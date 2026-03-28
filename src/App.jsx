@@ -1,63 +1,57 @@
-﻿import { useEffect, useState } from 'react'
-import { supabase } from './lib/supabaseClient'
+﻿import { Routes, Route, Navigate } from 'react-router-dom'
+import { useAuth } from './context/AuthContext'
+import ProtectedRoute from './components/ProtectedRoute'
+import Login from './pages/Login'
+import AdminDashboard from './pages/AdminDashboard'
+import AlmacenView from './pages/AlmacenView'
+import TiendaPOS from './pages/TiendaPOS'
 
-function App() {
-  const [status, setStatus] = useState('Verificando conexion...')
-  const [color, setColor] = useState('text-yellow-400')
-
-  useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const { error } = await supabase.from('roles').select('id').limit(1)
-        if (error) {
-          setStatus('Supabase conectado, pero error: ' + error.message)
-          setColor('text-orange-400')
-        } else {
-          setStatus('Supabase conectado correctamente')
-          setColor('text-green-400')
-        }
-      } catch (e) {
-        setStatus('Error de conexion: ' + e.message)
-        setColor('text-red-400')
-      }
-    }
-    checkConnection()
-  }, [])
-
-  return (
-    <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-6 font-sans">
-      <div className="bg-gray-800 border border-gray-700 rounded-2xl p-10 shadow-xl max-w-md w-full text-center">
-        <h1 className="text-3xl font-bold text-white mb-2">Sistema de Inventario</h1>
-        <p className="text-gray-400 mb-8 text-sm">Verificacion de Setup Inicial</p>
-        <div className="space-y-3 text-left">
-          <div className="flex items-center gap-3 bg-gray-900 rounded-xl p-4">
-            <span className="text-green-400 text-xl">OK</span>
-            <div>
-              <p className="text-white font-medium text-sm">Vite + React</p>
-              <p className="text-gray-500 text-xs">Funcionando</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 bg-gray-900 rounded-xl p-4">
-            <span className="text-green-400 text-xl">OK</span>
-            <div>
-              <p className="text-white font-medium text-sm">Tailwind CSS v4</p>
-              <p className="text-gray-500 text-xs">Si ves estilos oscuros, esta activo</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 bg-gray-900 rounded-xl p-4">
-            <span className="text-yellow-400 text-xl">DB</span>
-            <div>
-              <p className="text-white font-medium text-sm">Supabase</p>
-              <p id="supabase-status" className={color + " text-xs font-mono"}>{status}</p>
-            </div>
-          </div>
-        </div>
-        <p className="text-gray-600 text-xs mt-6">
-          Llena .env.local con tus credenciales reales de Supabase
-        </p>
-      </div>
-    </div>
-  )
+// Redirige segun el rol del usuario autenticado
+function RoleRedirect() {
+  const { userRole, isLoading } = useAuth()
+  if (isLoading) return null
+  if (!userRole) return <Navigate to="/login" replace />
+  const routes = { ADMIN: '/admin', ALMACENERO: '/almacen', VENDEDOR: '/pos' }
+  return <Navigate to={routes[userRole] ?? '/login'} replace />
 }
 
-export default App
+export default function App() {
+  return (
+    <Routes>
+      {/* Ruta publica */}
+      <Route path="/login" element={<Login />} />
+
+      {/* Redireccion raiz segun rol */}
+      <Route path="/" element={<RoleRedirect />} />
+
+      {/* Rutas protegidas por rol */}
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute allowedRoles={['ADMIN']}>
+            <AdminDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/almacen"
+        element={
+          <ProtectedRoute allowedRoles={['ADMIN', 'ALMACENERO']}>
+            <AlmacenView />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/pos"
+        element={
+          <ProtectedRoute allowedRoles={['ADMIN', 'VENDEDOR']}>
+            <TiendaPOS />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
+}

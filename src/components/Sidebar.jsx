@@ -1,12 +1,13 @@
-﻿import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   Package2, LayoutDashboard, Truck, BookOpen,
-  ShoppingCart, LogOut, ChevronRight
+  ShoppingCart, LogOut, ChevronRight, Calculator
 } from 'lucide-react'
 
 const NAV_ADMIN_ALMACENERO = [
   { to: '/admin',       icon: LayoutDashboard, label: 'Dashboard',   roles: ['ADMIN'] },
+  { to: '/admin/finanzas', icon: Calculator,   label: 'Finanzas y Costos', roles: ['ADMIN'] },
   { to: '/almacen',     icon: LayoutDashboard, label: 'Inicio',      roles: ['ALMACENERO'] },
   { to: '/proveedores', icon: Truck,           label: 'Proveedores', roles: ['ADMIN', 'ALMACENERO'] },
   { to: '/catalogo',    icon: BookOpen,        label: 'Catálogo',    roles: ['ADMIN', 'ALMACENERO'] },

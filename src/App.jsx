@@ -1,8 +1,9 @@
-﻿import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import AdminDashboard from './pages/AdminDashboard'
+import AdminFinanzas from './pages/AdminFinanzas'
 import AlmacenView from './pages/AlmacenView'
 import TiendaPOS from './pages/TiendaPOS'
 import Proveedores from './pages/Proveedores'
@@ -26,6 +27,9 @@ export default function App() {
       {/* Solo ADMIN */}
       <Route path="/admin" element={
         <ProtectedRoute allowedRoles={['ADMIN']}><AdminDashboard /></ProtectedRoute>
+      } />
+      <Route path="/admin/finanzas" element={
+        <ProtectedRoute allowedRoles={['ADMIN']}><AdminFinanzas /></ProtectedRoute>
       } />
 
       {/* ADMIN + ALMACENERO */}

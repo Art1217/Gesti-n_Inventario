@@ -5,8 +5,9 @@ import Login from './pages/Login'
 import AdminDashboard from './pages/AdminDashboard'
 import AlmacenView from './pages/AlmacenView'
 import TiendaPOS from './pages/TiendaPOS'
+import Proveedores from './pages/Proveedores'
+import Catalogo from './pages/Catalogo'
 
-// Redirige segun el rol del usuario autenticado
 function RoleRedirect() {
   const { userRole, isLoading } = useAuth()
   if (isLoading) return null
@@ -18,37 +19,30 @@ function RoleRedirect() {
 export default function App() {
   return (
     <Routes>
-      {/* Ruta publica */}
+      {/* Pública */}
       <Route path="/login" element={<Login />} />
-
-      {/* Redireccion raiz segun rol */}
       <Route path="/" element={<RoleRedirect />} />
 
-      {/* Rutas protegidas por rol */}
-      <Route
-        path="/admin"
-        element={
-          <ProtectedRoute allowedRoles={['ADMIN']}>
-            <AdminDashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/almacen"
-        element={
-          <ProtectedRoute allowedRoles={['ADMIN', 'ALMACENERO']}>
-            <AlmacenView />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/pos"
-        element={
-          <ProtectedRoute allowedRoles={['ADMIN', 'VENDEDOR']}>
-            <TiendaPOS />
-          </ProtectedRoute>
-        }
-      />
+      {/* Solo ADMIN */}
+      <Route path="/admin" element={
+        <ProtectedRoute allowedRoles={['ADMIN']}><AdminDashboard /></ProtectedRoute>
+      } />
+
+      {/* ADMIN + ALMACENERO */}
+      <Route path="/almacen" element={
+        <ProtectedRoute allowedRoles={['ADMIN', 'ALMACENERO']}><AlmacenView /></ProtectedRoute>
+      } />
+      <Route path="/proveedores" element={
+        <ProtectedRoute allowedRoles={['ADMIN', 'ALMACENERO']}><Proveedores /></ProtectedRoute>
+      } />
+      <Route path="/catalogo" element={
+        <ProtectedRoute allowedRoles={['ADMIN', 'ALMACENERO']}><Catalogo /></ProtectedRoute>
+      } />
+
+      {/* ADMIN + VENDEDOR */}
+      <Route path="/pos" element={
+        <ProtectedRoute allowedRoles={['ADMIN', 'VENDEDOR']}><TiendaPOS /></ProtectedRoute>
+      } />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />

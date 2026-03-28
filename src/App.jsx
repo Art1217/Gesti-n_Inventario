@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminFinanzas from './pages/AdminFinanzas'
 import AlmacenView from './pages/AlmacenView'
+import Transferencias from './pages/Transferencias'
 import TiendaPOS from './pages/TiendaPOS'
 import Proveedores from './pages/Proveedores'
 import Catalogo from './pages/Catalogo'
@@ -35,6 +36,9 @@ export default function App() {
       {/* ADMIN + ALMACENERO */}
       <Route path="/almacen" element={
         <ProtectedRoute allowedRoles={['ADMIN', 'ALMACENERO']}><AlmacenView /></ProtectedRoute>
+      } />
+      <Route path="/transferencias" element={
+        <ProtectedRoute allowedRoles={['ADMIN', 'ALMACENERO']}><Transferencias /></ProtectedRoute>
       } />
       <Route path="/proveedores" element={
         <ProtectedRoute allowedRoles={['ADMIN', 'ALMACENERO']}><Proveedores /></ProtectedRoute>

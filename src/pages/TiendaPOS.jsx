@@ -41,6 +41,7 @@ export default function TiendaPOS() {
   const [metodoPago, setMetodoPago] = useState(null)
   const [processing, setProcessing] = useState(false)
   const [ventaOk, setVentaOk] = useState(false)
+  const [finalTotal, setFinalTotal] = useState(0)   // ← guarda el total antes de limpiar el carrito
   const [error, setError] = useState(null)
 
   // --- Búsqueda ---
@@ -178,6 +179,7 @@ export default function TiendaPOS() {
       const { error: movError } = await supabase.from('movimientos').insert(movimientos)
       if (movError) throw new Error(`Error al registrar movimiento: ${movError.message}`)
 
+      setFinalTotal(total)   // ← capturar ANTES de limpiar el carrito
       setVentaOk(true)
       setCarrito([])
       setQuery('')
@@ -406,7 +408,7 @@ export default function TiendaPOS() {
                 </div>
                 <h2 className="text-2xl font-bold text-white mb-1">¡Venta Completada!</h2>
                 <p className="text-gray-400 text-sm mb-2">Total cobrado</p>
-                <p className="text-emerald-400 font-bold text-3xl font-mono mb-6">S/ {total.toFixed(2)}</p>
+                <p className="text-emerald-400 font-bold text-3xl font-mono mb-6">S/ {finalTotal.toFixed(2)}</p>
                 <button onClick={cerrarModal} className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-colors">
                   Nueva Venta
                 </button>

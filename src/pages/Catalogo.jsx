@@ -1,7 +1,8 @@
-﻿import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
 import { supabase } from '../lib/supabaseClient'
-import { Plus, Pencil, Trash2, X, Loader2, BookOpen, AlertCircle, Search } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, Loader2, BookOpen, AlertCircle, Search, Barcode as BarcodeIcon, Printer } from 'lucide-react'
+import Barcode from 'react-barcode'
 
 const EMPTY_FORM = { sku: '', nombre: '', categoria: '', id_proveedor: '' }
 
@@ -48,6 +49,7 @@ export default function Catalogo() {
   const [editingId, setEditingId]     = useState(null)
   const [form, setForm]               = useState(EMPTY_FORM)
   const [search, setSearch]           = useState('')
+  const [barcodeProduct, setBarcodeProduct] = useState(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -77,6 +79,9 @@ export default function Catalogo() {
     setModalOpen(true)
   }
   const closeModal = () => { setModalOpen(false); setEditingId(null); setForm(EMPTY_FORM); setError(null) }
+
+  const openBarcode = (p) => setBarcodeProduct(p)
+  const closeBarcode = () => setBarcodeProduct(null)
 
   const handleSave = async (e) => {
     e.preventDefault()
@@ -209,6 +214,9 @@ export default function Catalogo() {
                       <td className="px-6 py-4 text-gray-400 text-sm">{p.proveedores?.nombre || <span className="text-gray-600">—</span>}</td>
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-end gap-2">
+                          <button onClick={() => openBarcode(p)} className="p-1.5 text-gray-500 hover:text-emerald-400 hover:bg-emerald-400/10 rounded-lg transition-all" title="Ver Código de Barras">
+                            <BarcodeIcon className="w-4 h-4" />
+                          </button>
                           <button onClick={() => openEdit(p)} className="p-1.5 text-gray-500 hover:text-indigo-400 hover:bg-indigo-400/10 rounded-lg transition-all" title="Editar">
                             <Pencil className="w-4 h-4" />
                           </button>
@@ -275,6 +283,33 @@ export default function Catalogo() {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+      {/* Modal Barcode */}
+      {barcodeProduct && (
+        <Modal title="Código de Barras" onClose={closeBarcode}>
+          <div className="flex flex-col items-center justify-center space-y-6">
+            <div id="print-barcode-area" className="bg-white px-8 py-6 rounded-2xl">
+              <Barcode value={barcodeProduct.sku} width={2} height={80} displayValue={true} />
+            </div>
+            <p className="text-gray-400 text-sm text-center">
+              Producto: <span className="text-white font-semibold">{barcodeProduct.nombre}</span>
+            </p>
+            <button
+              onClick={() => {
+                const printContent = document.getElementById('print-barcode-area').innerHTML;
+                const originalContents = document.body.innerHTML;
+                document.body.innerHTML = `<div style="display:flex;justify-content:center;align-items:center;height:100vh;">${printContent}</div>`;
+                window.print();
+                document.body.innerHTML = originalContents;
+                window.location.reload(); // Recargar para restaurar los listeners de React completos
+              }}
+              className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition-colors"
+            >
+              <Printer className="w-4 h-4" />
+              Imprimir Código
+            </button>
+          </div>
         </Modal>
       )}
     </Layout>

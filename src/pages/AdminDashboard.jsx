@@ -8,7 +8,7 @@ import {
 import {
   TrendingUp, AlertTriangle, ShoppingBag, Warehouse,
   Store, Loader2, RefreshCw, Clock, ArrowRightLeft,
-  PackagePlus, ShoppingCart
+  PackagePlus, ShoppingCart, Printer
 } from 'lucide-react'
 
 // ─── Colores ───────────────────────────────────────────────
@@ -56,92 +56,70 @@ export default function AdminDashboard() {
   const [movimientos, setMovimientos] = useState([])
   const [movLoading, setMovLoading] = useState(true)
 
-  const fetchAll = useCallback(async () => {
+  const [filtroFecha, setFiltroFecha] = useState(() => {
+    const d = new Date()
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
+    return d.toISOString().slice(0, 10)
+  })
+
+  // ── Solo KPIs y Gráficos ──
+  const fetchKpiAndCharts = useCallback(async () => {
     const hoyStart = new Date(); hoyStart.setHours(0,0,0,0)
     const hoyEnd   = new Date(); hoyEnd.setHours(23,59,59,999)
 
-    // ── KPIs ──
     setKpiLoading(true)
     try {
       const [ventasRes, opHoyRes, critAlmRes, critTiendaRes] = await Promise.all([
-        supabase
-          .from('movimientos')
-          .select('total_final')
-          .eq('tipo_movimiento', 'VENTA')
-          .gte('created_at', hoyStart.toISOString())
-          .lte('created_at', hoyEnd.toISOString()),
-        supabase
-          .from('movimientos')
-          .select('id', { count: 'exact', head: true })
-          .gte('created_at', hoyStart.toISOString())
-          .lte('created_at', hoyEnd.toISOString()),
-        supabase
-          .from('inventario_almacen')
-          .select('id_producto', { count: 'exact', head: true })
-          .lt('stock_fisico', 10),
-        supabase
-          .from('inventario_tienda')
-          .select('id_producto', { count: 'exact', head: true })
-          .lt('stock_exhibicion', 5),
+        supabase.from('movimientos').select('total_final').eq('tipo_movimiento', 'VENTA').gte('created_at', hoyStart.toISOString()).lte('created_at', hoyEnd.toISOString()),
+        supabase.from('movimientos').select('id', { count: 'exact', head: true }).gte('created_at', hoyStart.toISOString()).lte('created_at', hoyEnd.toISOString()),
+        supabase.from('inventario_almacen').select('id_producto', { count: 'exact', head: true }).lt('stock_fisico', 10),
+        supabase.from('inventario_tienda').select('id_producto', { count: 'exact', head: true }).lt('stock_exhibicion', 5),
       ])
-
       const ventasHoy = (ventasRes.data ?? []).reduce((s, r) => s + (r.total_final || 0), 0)
-      setKpi({
-        ventasHoy,
-        opHoy: opHoyRes.count ?? 0,
-        critAlmacen: critAlmRes.count ?? 0,
-        critTienda: critTiendaRes.count ?? 0,
-      })
-    } finally {
-      setKpiLoading(false)
-    }
+      setKpi({ ventasHoy, opHoy: opHoyRes.count ?? 0, critAlmacen: critAlmRes.count ?? 0, critTienda: critTiendaRes.count ?? 0 })
+    } finally { setKpiLoading(false) }
 
-    // ── Gráficos ──
     setChartsLoading(true)
     try {
-      const { data: ventasMov } = await supabase
-        .from('movimientos')
-        .select('metodo_pago, total_final, cantidad, productos(nombre)')
-        .eq('tipo_movimiento', 'VENTA')
-
-      // Pie: agrupar por método de pago
+      const { data: ventasMov } = await supabase.from('movimientos').select('metodo_pago, total_final, cantidad, productos(nombre)').eq('tipo_movimiento', 'VENTA')
       const pagoMap = {}
-      ;(ventasMov ?? []).forEach(m => {
-        const key = m.metodo_pago ?? 'Sin método'
-        pagoMap[key] = (pagoMap[key] || 0) + (m.total_final || 0)
-      })
+      ;(ventasMov ?? []).forEach(m => { const key = m.metodo_pago ?? 'Sin método'; pagoMap[key] = (pagoMap[key] || 0) + (m.total_final || 0) })
       setPieData(Object.entries(pagoMap).map(([name, value]) => ({ name, value: parseFloat(value.toFixed(2)) })))
 
-      // Bar: top 5 productos más vendidos
       const prodMap = {}
-      ;(ventasMov ?? []).forEach(m => {
-        const nombre = m.productos?.nombre ?? 'Desconocido'
-        prodMap[nombre] = (prodMap[nombre] || 0) + (m.cantidad || 0)
-      })
-      const sorted = Object.entries(prodMap)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([name, vendidos]) => ({ name: name.length > 14 ? name.slice(0, 13) + '…' : name, vendidos }))
+      ;(ventasMov ?? []).forEach(m => { const nombre = m.productos?.nombre ?? 'Desconocido'; prodMap[nombre] = (prodMap[nombre] || 0) + (m.cantidad || 0) })
+      const sorted = Object.entries(prodMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, vendidos]) => ({ name: name.length > 14 ? name.slice(0, 13) + '…' : name, vendidos }))
       setBarData(sorted)
-    } finally {
-      setChartsLoading(false)
-    }
+    } finally { setChartsLoading(false) }
+  }, [])
 
-    // ── Movimientos recientes ──
+  // ── Solo Movimientos con Filtro ──
+  const fetchMovimientos = useCallback(async (fecha) => {
     setMovLoading(true)
     try {
+      const parts = fecha.split('-')
+      const start = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0)
+      const end = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999)
+
       const { data } = await supabase
         .from('movimientos')
         .select('*, productos(nombre, sku)')
+        .gte('created_at', start.toISOString())
+        .lte('created_at', end.toISOString())
         .order('created_at', { ascending: false })
-        .limit(15)
       setMovimientos(data ?? [])
     } finally {
       setMovLoading(false)
     }
   }, [])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => { fetchKpiAndCharts() }, [fetchKpiAndCharts])
+  useEffect(() => { fetchMovimientos(filtroFecha) }, [filtroFecha, fetchMovimientos])
+
+  const handleRefresh = () => {
+    fetchKpiAndCharts()
+    fetchMovimientos(filtroFecha)
+  }
 
   const fmt = (n) => `S/ ${(n || 0).toFixed(2)}`
   const fmtDate = (iso) => {
@@ -151,10 +129,24 @@ export default function AdminDashboard() {
 
   return (
     <Layout>
-      <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8">
+      <style>{`
+        @media print {
+          aside { display: none !important; }
+          .lg\\:hidden { display: none !important; }
+          body, main { background: white !important; overflow: visible !important; height: auto !important; }
+          .print\\:hidden { display: none !important; }
+          .print\\:text-black { color: #000 !important; }
+          .print\\:bg-white { background: #fff !important; color: #000 !important; }
+          .print\\:border-none { border: none !important; }
+          .print\\:table { width: 100% !important; border-collapse: collapse !important; }
+          .print\\:th { border-bottom: 2px solid #ccc !important; color: #000 !important; }
+          .print\\:td { border-bottom: 1px solid #eee !important; color: #000 !important; }
+        }
+      `}</style>
+      <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 print:p-0 print:space-y-4">
 
         {/* ── Header ── */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between print:hidden">
           <div>
             <h1 className="text-2xl font-bold text-white flex items-center gap-3">
               <TrendingUp className="w-7 h-7 text-indigo-400" />
@@ -163,7 +155,7 @@ export default function AdminDashboard() {
             <p className="text-gray-500 text-sm mt-1">Resumen en tiempo real de tu operación</p>
           </div>
           <button
-            onClick={fetchAll}
+            onClick={handleRefresh}
             className="flex items-center gap-2 px-4 py-2 text-sm bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-xl border border-gray-700 transition-all"
           >
             <RefreshCw className="w-4 h-4" />
@@ -172,7 +164,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* ── KPIs ── */}
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 print:hidden">
           <KpiCard
             title="Ventas de Hoy (S/)"
             value={fmt(kpi.ventasHoy)}
@@ -210,7 +202,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* ── Gráficos ── */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 print:hidden">
 
           {/* Pie – ventas por método de pago */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
@@ -283,11 +275,29 @@ export default function AdminDashboard() {
         </div>
 
         {/* ── Últimos movimientos ── */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-          <div className="px-6 py-5 border-b border-gray-800 flex items-center gap-3">
-            <Clock className="w-5 h-5 text-gray-500" />
-            <h2 className="text-white font-semibold">Últimos Movimientos</h2>
-            <span className="ml-auto text-xs text-gray-600">Últimos 15 registros</span>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden print:border-none print:bg-white print:rounded-none">
+          <div className="px-6 py-5 border-b border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:border-b-2 print:border-black print:px-0">
+            <div className="flex items-center gap-3">
+              <Clock className="w-5 h-5 text-gray-500 print:hidden" />
+              <h2 className="text-white font-semibold print:text-black print:text-xl">Libro Diario de Control</h2>
+            </div>
+
+            <div className="flex items-center gap-3 print:hidden">
+              <input
+                type="date"
+                value={filtroFecha}
+                onChange={(e) => setFiltroFecha(e.target.value)}
+                className="bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+              />
+              <button 
+                onClick={() => window.print()}
+                className="flex items-center gap-2 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors border border-indigo-500"
+              >
+                <Printer className="w-4 h-4" />
+                <span className="hidden sm:inline">Imprimir Reporte</span>
+                <span className="sm:hidden">Imprimir</span>
+              </button>
+            </div>
           </div>
 
           {movLoading ? (
@@ -297,15 +307,16 @@ export default function AdminDashboard() {
           ) : movimientos.length === 0 ? (
             <div className="text-center py-16 text-gray-600 text-sm">No hay movimientos registrados aún.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="border-b border-gray-800 bg-gray-950/40">
-                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fecha / Hora</th>
-                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tipo</th>
-                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Producto</th>
-                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center">Cant.</th>
-                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Total</th>
+            <div className="overflow-x-auto max-h-[600px] overflow-y-auto print:max-h-none print:overflow-visible">
+              <table className="w-full text-left print:table">
+                <thead className="sticky top-0 bg-gray-950/90 backdrop-blur-sm print:static print:bg-transparent">
+                  <tr className="border-b border-gray-800 print:border-black">
+                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider print:th">Fecha / Hora</th>
+                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider print:th">Tipo</th>
+                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider print:th">Producto</th>
+                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center print:th">Cant.</th>
+                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center print:th">Usuario</th>
+                    <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right print:th">Total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/50">
@@ -314,24 +325,25 @@ export default function AdminDashboard() {
                     const Icon = meta.icon
                     return (
                       <tr key={mov.id} className="hover:bg-gray-800/30 transition-colors">
-                        <td className="px-6 py-3.5 text-gray-400 text-sm font-mono whitespace-nowrap">
+                        <td className="px-6 py-3.5 text-gray-400 text-sm font-mono whitespace-nowrap print:td">
                           {fmtDate(mov.created_at)}
                         </td>
-                        <td className="px-6 py-3.5">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border ${meta.bg} ${meta.color}`}>
-                            <Icon className="w-3 h-3" />
+                        <td className="px-6 py-3.5 print:td">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border ${meta.bg} ${meta.color} print:border-none print:text-black print:p-0`}>
+                            <Icon className="w-3 h-3 print:hidden" />
                             {meta.label}
                           </span>
                         </td>
-                        <td className="px-6 py-3.5">
-                          <p className="text-white text-sm">{mov.productos?.nombre ?? '—'}</p>
-                          <p className="text-gray-600 font-mono text-xs">{mov.productos?.sku}</p>
+                        <td className="px-6 py-3.5 print:td">
+                          <p className="text-white text-sm print:text-black">{mov.productos?.nombre ?? '—'}</p>
+                          <p className="text-gray-600 font-mono text-xs print:text-gray-800">{mov.productos?.sku}</p>
                         </td>
-                        <td className="px-6 py-3.5 text-center text-gray-300 text-sm font-semibold">{mov.cantidad}</td>
-                        <td className="px-6 py-3.5 text-right">
+                        <td className="px-6 py-3.5 text-center text-gray-300 text-sm font-semibold print:td">{mov.cantidad}</td>
+                        <td className="px-6 py-3.5 text-center text-gray-500 text-xs font-mono print:td">{mov.id_usuario?.substring(0, 8) ?? '—'}</td>
+                        <td className="px-6 py-3.5 text-right print:td">
                           {mov.total_final
-                            ? <span className="text-emerald-400 font-mono font-semibold text-sm">{fmt(mov.total_final)}</span>
-                            : <span className="text-gray-700 text-sm">—</span>
+                            ? <span className="text-emerald-400 font-mono font-semibold text-sm print:text-black">{fmt(mov.total_final)}</span>
+                            : <span className="text-gray-700 text-sm print:text-black">—</span>
                           }
                         </td>
                       </tr>

@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
-import Layout from '../components/Layout'
+import Sidebar from '../components/Sidebar'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
-import {
-  ScanLine, Search, ShoppingCart, Plus, Minus, Trash2,
+import { ScanLine, Search, ShoppingCart, Plus, Minus, Trash2,
   X, Loader2, CheckCircle, CreditCard, Banknote,
-  Smartphone, AlertCircle, Receipt, PackageX
+  Smartphone, AlertCircle, Receipt, PackageX, LogOut
 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 const IGV_RATE = 0.18
 
@@ -24,7 +24,13 @@ function getPrecioFinal(item) {
 }
 
 export default function TiendaPOS() {
-  const { user } = useAuth()
+  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+
+  const handleLogout = async () => {
+    await signOut()
+    navigate('/login', { replace: true })
+  }
 
   // Catálogo y búsqueda
   const [query, setQuery] = useState('')
@@ -216,12 +222,73 @@ export default function TiendaPOS() {
     setError(null)
   }
 
+  // Tab activo en móvil: 'buscar' | 'carrito'
+  const [mobileTab, setMobileTab] = useState('buscar')
+  const totalItems = carrito.reduce((s, c) => s + c.cantidad, 0)
+
   return (
-    <Layout>
-      <div className="flex h-[calc(100vh-0px)] overflow-hidden">
+    <div className="flex min-h-screen bg-gray-950">
+      {/* Sidebar: oculto en mobile, visible en lg+ */}
+      <div className="hidden lg:block">
+        <Sidebar />
+      </div>
+
+      {/* Contenido principal */}
+      <div className="flex-1 flex flex-col overflow-hidden h-screen">
+
+        {/* ── Header móvil: sólo visible en < lg, con email y botón logout ── */}
+        <div className="lg:hidden flex items-center justify-between px-4 py-2.5 bg-gray-900 border-b border-gray-800 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-indigo-600 flex items-center justify-center">
+              <ShoppingCart className="w-3.5 h-3.5 text-white" />
+            </div>
+            <p className="text-gray-400 text-xs truncate max-w-[180px]">{user?.email}</p>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 hover:text-red-400 hover:bg-red-900/10 rounded-lg transition-colors"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Salir
+          </button>
+        </div>
+
+        {/* ── Tabs móvil ── */}
+        <div className="lg:hidden flex border-b border-gray-800 bg-gray-900 flex-shrink-0">
+          <button
+            onClick={() => setMobileTab('buscar')}
+            className={`flex-1 py-3.5 text-sm font-semibold flex items-center justify-center gap-2 transition-colors ${
+              mobileTab === 'buscar'
+                ? 'text-emerald-400 border-b-2 border-emerald-400'
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            <Search className="w-4 h-4" />
+            Buscar Producto
+          </button>
+          <button
+            onClick={() => setMobileTab('carrito')}
+            className={`flex-1 py-3.5 text-sm font-semibold flex items-center justify-center gap-2 transition-colors relative ${
+              mobileTab === 'carrito'
+                ? 'text-emerald-400 border-b-2 border-emerald-400'
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            <ShoppingCart className="w-4 h-4" />
+            Carrito
+            {totalItems > 0 && (
+              <span className="absolute top-2 right-6 w-5 h-5 bg-emerald-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                {totalItems}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* ── Cuerpo: dos columnas en desktop, tabs en móvil ── */}
+        <div className="flex flex-1 overflow-hidden">
 
         {/* ── IZQUIERDA: CARRITO ── */}
-        <div className="w-80 xl:w-96 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col">
+        <div className={`flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col w-full lg:w-80 xl:w-96 ${mobileTab === 'carrito' ? 'flex' : 'hidden'} lg:flex`}>
           {/* Header */}
           <div className="px-5 py-4 border-b border-gray-800 flex items-center gap-3">
             <ShoppingCart className="w-5 h-5 text-emerald-400" />
@@ -299,7 +366,7 @@ export default function TiendaPOS() {
         </div>
 
         {/* ── DERECHA: BÚSQUEDA Y CATÁLOGO ── */}
-        <div className="flex-1 overflow-y-auto flex flex-col bg-gray-950">
+        <div className={`flex-1 overflow-y-auto flex flex-col bg-gray-950 ${mobileTab === 'buscar' ? 'flex' : 'hidden'} lg:flex`}>
           {/* Header búsqueda */}
           <div className="sticky top-0 z-10 bg-gray-950/95 backdrop-blur-sm border-b border-gray-800 px-6 py-4">
             <div className="flex items-center gap-4">
@@ -411,6 +478,7 @@ export default function TiendaPOS() {
             </div>
           </div>
         </div>
+        </div>
       </div>
 
       {/* ── MODAL DE PAGO ── */}
@@ -503,6 +571,6 @@ export default function TiendaPOS() {
           </div>
         </div>
       )}
-    </Layout>
+    </div>
   )
 }

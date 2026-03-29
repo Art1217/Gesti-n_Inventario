@@ -1,11 +1,16 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import mkcert from 'vite-plugin-mkcert'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    mkcert(),   // Genera certificado SSL local → habilita HTTPS → habilita cámara en red local
   ],
+  server: {
+    https: true,
+  }
 })

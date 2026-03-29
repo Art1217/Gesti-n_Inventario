@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode'
+import { Html5Qrcode } from 'html5-qrcode'
 import Layout from '../components/Layout'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
@@ -83,33 +83,51 @@ export default function TiendaPOS() {
 
   // Limpieza del escáner al desmontar
   useEffect(() => {
-    return () => { scannerRef.current?.clear().catch(console.error) }
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {})
+      }
+    }
   }, [])
 
   // --- Escáner ---
   const handleScanned = useCallback(async (sku) => {
-    scannerRef.current?.clear().catch(console.error)
+    // Detener escáner antes de buscar
+    if (scannerRef.current) {
+      try { await scannerRef.current.stop() } catch (_) {}
+      try { scannerRef.current.clear() } catch (_) {}
+      scannerRef.current = null
+    }
     setIsScanning(false)
     setQuery(sku)
     await buscarProductos(sku)
   }, [buscarProductos])
 
-  const startScanner = () => {
+  const startScanner = async () => {
     setIsScanning(true)
-    setTimeout(() => {
-      if (!document.getElementById('pos-reader')) return
-      const scanner = new Html5QrcodeScanner(
-        'pos-reader',
-        { fps: 10, qrbox: { width: 220, height: 220 }, supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA] },
-        false
-      )
-      scannerRef.current = scanner
-      scanner.render((decoded) => handleScanned(decoded), () => {})
-    }, 100)
+    await new Promise(r => setTimeout(r, 150))
+    try {
+      const qrcode = new Html5Qrcode('pos-reader')
+      scannerRef.current = qrcode
+      // Intentar cámara trasera estricta, fallback a cualquier cámara si falla (ej: desktop)
+      const camConfig = { facingMode: { exact: 'environment' } }
+      try {
+        await qrcode.start(camConfig, { fps: 12, qrbox: { width: 220, height: 220 } }, (decoded) => handleScanned(decoded), () => {})
+      } catch (_) {
+        await qrcode.start('environment', { fps: 12, qrbox: { width: 220, height: 220 } }, (decoded) => handleScanned(decoded), () => {})
+      }
+    } catch (err) {
+      console.error('Error iniciando escáner POS:', err)
+      setIsScanning(false)
+    }
   }
 
-  const stopScanner = () => {
-    scannerRef.current?.clear().catch(console.error)
+  const stopScanner = async () => {
+    if (scannerRef.current) {
+      try { await scannerRef.current.stop() } catch (_) {}
+      try { scannerRef.current.clear() } catch (_) {}
+      scannerRef.current = null
+    }
     setIsScanning(false)
   }
 

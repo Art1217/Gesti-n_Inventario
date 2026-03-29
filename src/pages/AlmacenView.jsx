@@ -1,5 +1,5 @@
-﻿import { useState, useEffect, useCallback, useRef } from 'react'
-import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Html5Qrcode } from 'html5-qrcode'
 import Layout from '../components/Layout'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
@@ -99,28 +99,31 @@ export default function AlmacenView() {
     setForm({ cantidad: '' })
   }
 
-  const startScanner = () => {
+  const startScanner = async () => {
     setIsScanning(true)
     setError(null)
-    setTimeout(() => {
-      if(!document.getElementById('reader')) return;
-      const html5QrcodeScanner = new Html5QrcodeScanner(
-        "reader",
-        { fps: 10, qrbox: {width: 250, height: 250}, supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA] },
-        false
-      );
-      scannerRef.current = html5QrcodeScanner;
-      
-      html5QrcodeScanner.render(
-        (decodedText) => handleProductFound(decodedText),
-        (error) => {} // ignores read errors
-      );
-    }, 100)
+    await new Promise(r => setTimeout(r, 150))
+    try {
+      const qrcode = new Html5Qrcode('reader')
+      scannerRef.current = qrcode
+      const camConfig = { facingMode: { exact: 'environment' } }
+      try {
+        await qrcode.start(camConfig, { fps: 12, qrbox: { width: 240, height: 240 } }, (decodedText) => handleProductFound(decodedText), () => {})
+      } catch (_) {
+        await qrcode.start('environment', { fps: 12, qrbox: { width: 240, height: 240 } }, (decodedText) => handleProductFound(decodedText), () => {})
+      }
+    } catch (err) {
+      console.error('Error iniciando escáner:', err)
+      setIsScanning(false)
+      setError('No se pudo acceder a la cámara. Verifica los permisos o usa HTTPS.')
+    }
   }
 
-  const stopScanner = () => {
+  const stopScanner = async () => {
     if (scannerRef.current) {
-      scannerRef.current.clear().catch(console.error)
+      try { await scannerRef.current.stop() } catch (_) {}
+      try { scannerRef.current.clear() } catch (_) {}
+      scannerRef.current = null
     }
     setIsScanning(false)
   }

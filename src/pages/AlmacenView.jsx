@@ -40,7 +40,7 @@ export default function AlmacenView() {
     try {
       const { data, error } = await supabase
         .from('inventario_almacen')
-        .select('*, productos(sku, nombre, categoria)')
+        .select('*, producto_variantes(*, productos(*))')
       if (error) throw error
       setStock(data ?? [])
     } catch(err) {
@@ -69,19 +69,19 @@ export default function AlmacenView() {
     setError(null)
     try {
       const { data, error } = await supabase
-        .from('productos')
-        .select('*')
+        .from('producto_variantes')
+        .select('*, productos(nombre)')
         .eq('sku', sku)
         .limit(1)
 
       if (error) throw error
       
-      const product = data?.[0]
-      if (!product) {
+      const variante = data?.[0]
+      if (!variante) {
         setError(`Producto no encontrado en el catálogo (SKU: ${sku})`)
         setScannedProduct(null)
       } else {
-        setScannedProduct(product)
+        setScannedProduct(variante)
         setForm({ cantidad: '' })
         setModalOpen(true)
       }
@@ -146,7 +146,7 @@ export default function AlmacenView() {
       const { data: currentStockData, error: checkError } = await supabase
         .from('inventario_almacen')
         .select('*')
-        .eq('id_producto', scannedProduct.id)
+        .eq('id_variante', scannedProduct.id)
         .limit(1)
         
       if (checkError) throw checkError
@@ -159,19 +159,19 @@ export default function AlmacenView() {
         const { error: updateError } = await supabase
           .from('inventario_almacen')
           .update({ stock_fisico: newTotalStock })
-          .eq('id_producto', scannedProduct.id)
+          .eq('id_variante', scannedProduct.id)
         if (updateError) throw updateError
       } else {
         const { error: insertError } = await supabase
           .from('inventario_almacen')
-          .insert({ id_producto: scannedProduct.id, stock_fisico: newTotalStock, costo_unitario: 0 })
+          .insert({ id_variante: scannedProduct.id, stock_fisico: newTotalStock, costo_unitario: 0 })
         if (insertError) throw insertError
       }
 
       const { error: movError } = await supabase
         .from('movimientos')
         .insert({
-          id_producto: scannedProduct.id,
+          id_variante: scannedProduct.id,
           id_usuario: user.id,
           tipo_movimiento: 'ENTRADA',
           cantidad: amountToAdd,
@@ -273,10 +273,17 @@ export default function AlmacenView() {
                  </thead>
                  <tbody className="divide-y divide-gray-800/60">
                    {stock.map((item) => (
-                     <tr key={item.id_producto} className="hover:bg-gray-800/30 transition-colors">
+                     <tr key={item.id_variante} className="hover:bg-gray-800/30 transition-colors">
                        <td className="px-6 py-4">
-                         <div className="text-white font-medium text-sm">{item.productos?.nombre}</div>
-                         <div className="text-gray-500 font-mono text-xs">{item.productos?.sku}</div>
+                         <div className="text-white font-medium text-sm">{item.producto_variantes?.productos?.nombre}</div>
+                         <div className="flex items-center gap-2 mt-1">
+                           <span className="bg-gray-800 text-indigo-300 px-2 py-0.5 rounded text-xs font-mono">{item.producto_variantes?.sku}</span>
+                           {(item.producto_variantes?.talla || item.producto_variantes?.color) && (
+                             <span className="text-gray-500 text-xs uppercase">
+                               {item.producto_variantes.talla ? `T:${item.producto_variantes.talla}` : ''} {item.producto_variantes.color ? `C:${item.producto_variantes.color}` : ''}
+                             </span>
+                           )}
+                         </div>
                        </td>
                        <td className="px-6 py-4 text-right">
                          <span className="inline-flex px-3 py-1 bg-amber-500/10 text-amber-400 font-bold rounded-lg text-sm border border-amber-500/20">
@@ -295,9 +302,16 @@ export default function AlmacenView() {
       {modalOpen && scannedProduct && (
         <Modal title={<><PackagePlus className="w-5 h-5 text-amber-400"/> Agregar Stock</>} onClose={closeModal}>
            <div className="mb-6 p-4 bg-gray-800/60 border border-gray-700 rounded-xl">
-             <p className="text-gray-400 text-xs uppercase font-medium">Producto a ingresar</p>
-             <p className="text-white font-bold text-lg mt-1 leading-tight">{scannedProduct.nombre}</p>
-             <p className="text-indigo-300 font-mono text-xs mt-1">{scannedProduct.sku}</p>
+             <p className="text-gray-400 text-xs uppercase font-medium">Variante a ingresar</p>
+             <p className="text-white font-bold text-lg mt-1 leading-tight">{scannedProduct.productos?.nombre}</p>
+             <div className="flex items-center gap-2 mt-2">
+                 <span className="bg-gray-900 border border-indigo-500 text-indigo-300 px-2.5 py-1 rounded text-sm font-mono tracking-wide">{scannedProduct.sku}</span>
+                 {(scannedProduct.talla || scannedProduct.color) && (
+                   <span className="text-gray-400 text-xs uppercase font-medium">
+                     {scannedProduct.talla ? `T:${scannedProduct.talla} ` : ''} {scannedProduct.color ? `C:${scannedProduct.color}` : ''}
+                   </span>
+                 )}
+             </div>
            </div>
            
            {error && (

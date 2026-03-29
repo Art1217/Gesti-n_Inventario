@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { Plus, Pencil, Trash2, X, Loader2, BookOpen, AlertCircle, Search, Barcode as BarcodeIcon, Printer } from 'lucide-react'
 import Barcode from 'react-barcode'
 
-const EMPTY_FORM = { sku: '', nombre: '', categoria: '', id_proveedor: '' }
+const EMPTY_FORM = { nombre: '', categoria: '', id_proveedor: '', variantes: [{ sku: '', talla: '', color: '' }] }
 
 const CATEGORIAS = ['Electrónica', 'Ropa', 'Alimentos', 'Limpieza', 'Herramientas', 'Oficina', 'Otro']
 
@@ -56,7 +56,7 @@ export default function Catalogo() {
     setError(null)
     try {
       const [prodRes, provRes] = await Promise.all([
-        supabase.from('productos').select('*, proveedores(nombre)').order('nombre'),
+        supabase.from('productos').select('*, proveedores(nombre), producto_variantes(*)').order('nombre'),
         supabase.from('proveedores').select('id, nombre').order('nombre'),
       ])
       if (prodRes.error) throw prodRes.error
@@ -74,35 +74,56 @@ export default function Catalogo() {
 
   const openCreate = () => { setForm(EMPTY_FORM); setEditingId(null); setModalOpen(true) }
   const openEdit   = (p)  => {
-    setForm({ sku: p.sku ?? '', nombre: p.nombre ?? '', categoria: p.categoria ?? '', id_proveedor: p.id_proveedor ?? '' })
+    setForm({ 
+      nombre: p.nombre ?? '', 
+      categoria: p.categoria ?? '', 
+      id_proveedor: p.id_proveedor ?? '',
+      variantes: p.producto_variantes && p.producto_variantes.length > 0
+        ? p.producto_variantes.map(v => ({ id: v.id, sku: v.sku, talla: v.talla ?? '', color: v.color ?? '' }))
+        : [{ sku: '', talla: '', color: '' }]
+    })
     setEditingId(p.id)
     setModalOpen(true)
   }
   const closeModal = () => { setModalOpen(false); setEditingId(null); setForm(EMPTY_FORM); setError(null) }
 
-  const openBarcode = (p) => setBarcodeProduct(p)
+  const openBarcode = (varianteInfo) => setBarcodeProduct(varianteInfo)
   const closeBarcode = () => setBarcodeProduct(null)
 
   const handleSave = async (e) => {
     e.preventDefault()
     setSaving(true)
     setError(null)
-    const payload = {
-      sku: form.sku,
+    const payloadProd = {
       nombre: form.nombre,
       categoria: form.categoria,
       id_proveedor: form.id_proveedor || null,
     }
     try {
-      let qError
+      let prodId = editingId
       if (editingId) {
-        const { error } = await supabase.from('productos').update(payload).eq('id', editingId)
-        qError = error
+        const { error } = await supabase.from('productos').update(payloadProd).eq('id', editingId)
+        if (error) throw error
       } else {
-        const { error } = await supabase.from('productos').insert(payload)
-        qError = error
+        const { data, error } = await supabase.from('productos').insert(payloadProd).select().single()
+        if (error) throw error
+        prodId = data.id
       }
-      if (qError) throw qError
+
+      // Variantes Upsert
+      const varPayload = form.variantes.map(v => {
+        const res = {
+          id_producto: prodId,
+          sku: v.sku,
+          talla: v.talla || null,
+          color: v.color || null
+        }
+        if (v.id) res.id = v.id
+        return res
+      })
+      const { error: varError } = await supabase.from('producto_variantes').upsert(varPayload)
+      if (varError) throw varError
+
       closeModal()
       fetchData()
     } catch (err) {
@@ -111,6 +132,17 @@ export default function Catalogo() {
       setSaving(false)
     }
   }
+
+  const handleVarChange = (index, field, value) => {
+    setForm(prev => {
+      const nw = [...prev.variantes]
+      nw[index] = { ...nw[index], [field]: value }
+      return { ...prev, variantes: nw }
+    })
+  }
+
+  const addVariante = () => setForm(prev => ({ ...prev, variantes: [...prev.variantes, { sku: '', talla: '', color: '' }] }))
+  const removeVariante = (index) => setForm(prev => ({ ...prev, variantes: prev.variantes.filter((_, i) => i !== index) }))
 
   const handleDelete = async (id) => {
     if (!window.confirm('¿Eliminar este producto? Esta acción no se puede deshacer.')) return
@@ -129,7 +161,9 @@ export default function Catalogo() {
   // Filtro por nombre o SKU (client-side)
   const filteredProductos = productos.filter(p => {
     const q = search.toLowerCase()
-    return (p.nombre ?? '').toLowerCase().includes(q) || (p.sku ?? '').toLowerCase().includes(q)
+    const matchesName = (p.nombre ?? '').toLowerCase().includes(q)
+    const matchesSku = (p.producto_variantes ?? []).some(v => (v.sku ?? '').toLowerCase().includes(q))
+    return matchesName || matchesSku
   })
 
   return (
@@ -202,21 +236,35 @@ export default function Catalogo() {
                   {filteredProductos.map((p) => (
                     <tr key={p.id} className="hover:bg-gray-800/30 transition-colors">
                       <td className="px-6 py-4">
-                        <span className="font-mono text-xs bg-gray-800 text-indigo-300 px-2 py-1 rounded-lg">{p.sku || '—'}</span>
+                        <div className="flex flex-col gap-2">
+                          {(p.producto_variantes || []).length === 0 ? <span className="text-gray-500 text-xs">—</span> : null}
+                          {(p.producto_variantes || []).map(v => (
+                            <div key={v.id} className="flex items-center gap-2 bg-gray-800 text-indigo-300 pl-3 pr-2 py-1.5 rounded-lg border border-gray-700/50 w-max">
+                              <div>
+                                <span className="font-mono font-bold tracking-wide block leading-tight">{v.sku}</span>
+                                {(v.talla || v.color) && (
+                                  <span className="text-[10px] text-gray-400 uppercase block mb-0.5">
+                                    {v.talla ? `T:${v.talla} ` : ''} {v.color ? `C:${v.color}` : ''}
+                                  </span>
+                                )}
+                              </div>
+                              <button onClick={() => openBarcode({ sku: v.sku, nombre: `${p.nombre} ${v.talla||''} ${v.color||''}`.trim() })} className="ml-1 p-1 text-gray-500 hover:text-emerald-400 hover:bg-emerald-400/10 rounded transition-all" title="Ver Código de Barras">
+                                <BarcodeIcon className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </td>
-                      <td className="px-6 py-4 text-white font-medium text-sm">{p.nombre}</td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 text-white font-medium text-sm align-top pt-5">{p.nombre}</td>
+                      <td className="px-6 py-4 align-top pt-5">
                         {p.categoria
                           ? <span className="text-xs bg-gray-800 text-gray-300 px-2.5 py-1 rounded-full border border-gray-700">{p.categoria}</span>
                           : <span className="text-gray-600">—</span>
                         }
                       </td>
-                      <td className="px-6 py-4 text-gray-400 text-sm">{p.proveedores?.nombre || <span className="text-gray-600">—</span>}</td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4 text-gray-400 text-sm align-top pt-5">{p.proveedores?.nombre || <span className="text-gray-600">—</span>}</td>
+                      <td className="px-6 py-4 align-top pt-4">
                         <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => openBarcode(p)} className="p-1.5 text-gray-500 hover:text-emerald-400 hover:bg-emerald-400/10 rounded-lg transition-all" title="Ver Código de Barras">
-                            <BarcodeIcon className="w-4 h-4" />
-                          </button>
                           <button onClick={() => openEdit(p)} className="p-1.5 text-gray-500 hover:text-indigo-400 hover:bg-indigo-400/10 rounded-lg transition-all" title="Editar">
                             <Pencil className="w-4 h-4" />
                           </button>
@@ -238,36 +286,71 @@ export default function Catalogo() {
       {modalOpen && (
         <Modal title={editingId ? 'Editar Producto' : 'Nuevo Producto'} onClose={closeModal}>
           <form onSubmit={handleSave} className="space-y-4">
+            <InputField label="Nombre de Producto *" id="nombre" name="nombre" required value={form.nombre} onChange={handleChange} placeholder="Ej: Camisa Clásica" />
+
             <div className="grid grid-cols-2 gap-4">
-              <InputField label="SKU *" id="sku" name="sku" required value={form.sku} onChange={handleChange} placeholder="Ej: PROD-001" />
-              <InputField label="Nombre *" id="nombre" name="nombre" required value={form.nombre} onChange={handleChange} placeholder="Nombre del producto" />
+              <InputField label="Categoría" id="categoria">
+                <select
+                  id="categoria"
+                  name="categoria"
+                  value={form.categoria}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+                >
+                  <option value="">Sin categoría</option>
+                  {CATEGORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </InputField>
+
+              <InputField label="Proveedor" id="id_proveedor">
+                <select
+                  id="id_proveedor"
+                  name="id_proveedor"
+                  value={form.id_proveedor}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+                >
+                  <option value="">Sin proveedor</option>
+                  {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                </select>
+              </InputField>
             </div>
 
-            <InputField label="Categoría" id="categoria">
-              <select
-                id="categoria"
-                name="categoria"
-                value={form.categoria}
-                onChange={handleChange}
-                className="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
-              >
-                <option value="">Sin categoría</option>
-                {CATEGORIAS.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </InputField>
-
-            <InputField label="Proveedor" id="id_proveedor">
-              <select
-                id="id_proveedor"
-                name="id_proveedor"
-                value={form.id_proveedor}
-                onChange={handleChange}
-                className="w-full px-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
-              >
-                <option value="">Sin proveedor</option>
-                {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-              </select>
-            </InputField>
+            {/* Variantes */}
+            <div className="space-y-3 pt-2 bg-gray-900/50 -mx-6 px-6 py-4 border-y border-gray-800">
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-medium text-gray-300">Variantes (SKUs)</label>
+                <button type="button" onClick={addVariante} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 font-medium bg-indigo-500/10 px-2 py-1 rounded transition-colors">
+                  <Plus className="w-3.5 h-3.5" /> Añadir
+                </button>
+              </div>
+              
+              <div className="space-y-3 max-h-[35vh] overflow-y-auto pr-1 custom-scrollbar">
+                {form.variantes.map((v, idx) => (
+                  <div key={idx} className="flex items-start gap-3 bg-gray-800 p-3.5 rounded-xl border border-gray-700">
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider mb-1 block">SKU *</label>
+                        <input required placeholder="Ej: CAM-M-ROJ" className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white text-sm font-mono focus:ring-1 focus:ring-indigo-500" value={v.sku} onChange={e => handleVarChange(idx, 'sku', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider mb-1 block">Talla</label>
+                        <input placeholder="Ej: M" className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white text-sm focus:ring-1 focus:ring-indigo-500" value={v.talla} onChange={e => handleVarChange(idx, 'talla', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider mb-1 block">Color</label>
+                        <input placeholder="Ej: Rojo" className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white text-sm focus:ring-1 focus:ring-indigo-500" value={v.color} onChange={e => handleVarChange(idx, 'color', e.target.value)} />
+                      </div>
+                    </div>
+                    {form.variantes.length > 1 && (
+                      <button type="button" onClick={() => removeVariante(idx)} className="text-gray-500 hover:text-red-400 p-1 mt-6 transition-colors">
+                        <X className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
 
             {error && (
               <div className="text-red-300 text-sm bg-red-950/50 border border-red-800 rounded-xl px-3 py-2">{error}</div>

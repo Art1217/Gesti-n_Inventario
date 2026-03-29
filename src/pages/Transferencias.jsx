@@ -42,8 +42,8 @@ export default function Transferencias() {
 
   // Modal ingreso directo (solo ADMIN)
   const [directModal, setDirectModal] = useState(false)
-  const [directForm, setDirectForm] = useState({ id_producto: '', cantidad: '' })
-  const [todosProductos, setTodosProductos] = useState([])
+  const [directForm, setDirectForm] = useState({ id_variante: '', cantidad: '' })
+  const [todasVariantes, setTodasVariantes] = useState([])
 
   // ── Carga de datos ──
   const fetchAlmacen = useCallback(async () => {
@@ -51,7 +51,7 @@ export default function Transferencias() {
     try {
       const { data, error } = await supabase
         .from('inventario_almacen')
-        .select('*, productos(id, sku, nombre)')
+        .select('*, producto_variantes(*, productos(*))')
         .gt('stock_fisico', 0)
         .order('stock_fisico', { ascending: false })
       if (error) throw error
@@ -63,16 +63,16 @@ export default function Transferencias() {
     }
   }, [])
 
-  const fetchTodosProductos = useCallback(async () => {
+  const fetchTodasVariantes = useCallback(async () => {
     if (!isAdmin) return
-    const { data } = await supabase.from('productos').select('id, sku, nombre').order('nombre')
-    setTodosProductos(data ?? [])
+    const { data } = await supabase.from('producto_variantes').select('*, productos(nombre)').order('sku')
+    setTodasVariantes(data ?? [])
   }, [isAdmin])
 
   useEffect(() => {
     fetchAlmacen()
-    fetchTodosProductos()
-  }, [fetchAlmacen, fetchTodosProductos])
+    fetchTodasVariantes()
+  }, [fetchAlmacen, fetchTodasVariantes])
 
   const flash = (msg) => {
     setSuccess(msg)
@@ -95,14 +95,14 @@ export default function Transferencias() {
       const { error: errAlm } = await supabase
         .from('inventario_almacen')
         .update({ stock_fisico: item.stock_fisico - cantidad })
-        .eq('id_producto', item.id_producto)
+        .eq('id_variante', item.id_variante)
       if (errAlm) throw errAlm
 
       // 2. Sumar a tienda (upsert)
       const { data: tiendaActual, error: errCheck } = await supabase
         .from('inventario_tienda')
         .select('stock_exhibicion')
-        .eq('id_producto', item.id_producto)
+        .eq('id_variante', item.id_variante)
         .limit(1)
       if (errCheck) throw errCheck
 
@@ -110,18 +110,18 @@ export default function Transferencias() {
         const { error: errUpd } = await supabase
           .from('inventario_tienda')
           .update({ stock_exhibicion: tiendaActual[0].stock_exhibicion + cantidad })
-          .eq('id_producto', item.id_producto)
+          .eq('id_variante', item.id_variante)
         if (errUpd) throw errUpd
       } else {
         const { error: errIns } = await supabase
           .from('inventario_tienda')
-          .insert({ id_producto: item.id_producto, stock_exhibicion: cantidad, precio_venta: 0, descuento_porcentaje: 0 })
+          .insert({ id_variante: item.id_variante, stock_exhibicion: cantidad, precio_venta: 0, descuento_porcentaje: 0 })
         if (errIns) throw errIns
       }
 
       // 3. Movimiento
       const { error: errMov } = await supabase.from('movimientos').insert({
-        id_producto: item.id_producto,
+        id_variante: item.id_variante,
         id_usuario: user.id,
         tipo_movimiento: 'TRANSFERENCIA',
         cantidad,
@@ -131,7 +131,7 @@ export default function Transferencias() {
       setTransfModal(null)
       setCantTransf('')
       fetchAlmacen()
-      flash(`✓ ${cantidad} unid. de "${item.productos?.nombre}" enviadas a Tienda.`)
+      flash(`✓ ${cantidad} unid. de "${item.producto_variantes?.productos?.nombre}" (SKU: ${item.producto_variantes?.sku}) enviadas a Tienda.`)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -144,17 +144,17 @@ export default function Transferencias() {
     e.preventDefault()
     setProcessing(true)
     setError(null)
-    const { id_producto, cantidad: cantStr } = directForm
+    const { id_variante, cantidad: cantStr } = directForm
     const cantidad = parseInt(cantStr)
 
     try {
-      if (!id_producto) throw new Error('Selecciona un producto.')
+      if (!id_variante) throw new Error('Selecciona un producto.')
       if (cantidad <= 0) throw new Error('La cantidad debe ser mayor a cero.')
 
       const { data: tiendaActual, error: errCheck } = await supabase
         .from('inventario_tienda')
         .select('stock_exhibicion')
-        .eq('id_producto', id_producto)
+        .eq('id_variante', id_variante)
         .limit(1)
       if (errCheck) throw errCheck
 
@@ -162,27 +162,27 @@ export default function Transferencias() {
         const { error: errUpd } = await supabase
           .from('inventario_tienda')
           .update({ stock_exhibicion: tiendaActual[0].stock_exhibicion + cantidad })
-          .eq('id_producto', id_producto)
+          .eq('id_variante', id_variante)
         if (errUpd) throw errUpd
       } else {
         const { error: errIns } = await supabase
           .from('inventario_tienda')
-          .insert({ id_producto, stock_exhibicion: cantidad, precio_venta: 0, descuento_porcentaje: 0 })
+          .insert({ id_variante, stock_exhibicion: cantidad, precio_venta: 0, descuento_porcentaje: 0 })
         if (errIns) throw errIns
       }
 
       const { error: errMov } = await supabase.from('movimientos').insert({
-        id_producto,
+        id_variante,
         id_usuario: user.id,
         tipo_movimiento: 'INGRESO_DIRECTO_ADMIN',
         cantidad,
       })
       if (errMov) throw errMov
 
-      const prod = todosProductos.find(p => p.id === id_producto)
+      const varInst = todasVariantes.find(p => p.id === id_variante)
       setDirectModal(false)
-      setDirectForm({ id_producto: '', cantidad: '' })
-      flash(`✓ ${cantidad} unid. de "${prod?.nombre}" ingresadas directo a Tienda.`)
+      setDirectForm({ id_variante: '', cantidad: '' })
+      flash(`✓ ${cantidad} unid. de "${varInst?.productos?.nombre} (${varInst?.sku})" ingresadas directo a Tienda.`)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -270,11 +270,20 @@ export default function Transferencias() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/50">
-                  {stockAlmacen.map(item => (
-                    <tr key={item.id_producto} className="hover:bg-gray-800/30 transition-colors group">
+                  {stockAlmacen.map(item => {
+                    const variante = item.producto_variantes
+                    return (
+                    <tr key={item.id_variante} className="hover:bg-gray-800/30 transition-colors group">
                       <td className="px-6 py-4">
-                        <p className="text-white font-medium text-sm">{item.productos?.nombre}</p>
-                        <p className="text-gray-500 font-mono text-xs mt-0.5">{item.productos?.sku}</p>
+                        <p className="text-white font-medium text-sm">{variante?.productos?.nombre}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="bg-gray-800 text-indigo-300 px-2 py-0.5 rounded text-xs font-mono">{variante?.sku}</span>
+                          {(variante?.talla || variante?.color) && (
+                            <span className="text-gray-500 text-xs uppercase">
+                              {variante.talla ? `T:${variante.talla}` : ''} {variante.color ? `C:${variante.color}` : ''}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-center">
                         <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 text-amber-400 font-bold rounded-lg text-sm border border-amber-500/20">
@@ -292,7 +301,8 @@ export default function Transferencias() {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -304,9 +314,16 @@ export default function Transferencias() {
       {transfModal && (
         <Modal title="Enviar a Tienda" icon={ArrowRightLeft} iconColor="text-indigo-400" onClose={() => setTransfModal(null)}>
           <div className="mb-5 p-4 bg-gray-800/60 border border-gray-700 rounded-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-400 text-xs font-medium uppercase">Producto</span>
-              <span className="text-white font-semibold text-sm">{transfModal.productos?.nombre}</span>
+            <div className="flex flex-col mb-4 bg-gray-900 border border-gray-700/50 p-3 rounded-lg">
+              <span className="text-white font-semibold text-sm">{transfModal.producto_variantes?.productos?.nombre}</span>
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className="bg-gray-800 text-indigo-300 px-2 py-1 rounded text-xs font-mono tracking-wide">{transfModal.producto_variantes?.sku}</span>
+                {(transfModal.producto_variantes?.talla || transfModal.producto_variantes?.color) && (
+                  <span className="text-gray-400 text-xs uppercase font-medium">
+                    {transfModal.producto_variantes.talla ? `T:${transfModal.producto_variantes.talla} ` : ''} {transfModal.producto_variantes.color ? `C:${transfModal.producto_variantes.color}` : ''}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex items-center justify-between border-t border-gray-700 pt-3">
               <div className="flex items-center gap-1.5 text-xs text-gray-400"><Warehouse className="w-3.5 h-3.5 text-amber-400" /> Stock en Almacén</div>
@@ -363,13 +380,15 @@ export default function Transferencias() {
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Producto</label>
               <select
                 required
-                value={directForm.id_producto}
-                onChange={e => setDirectForm(f => ({ ...f, id_producto: e.target.value }))}
+                value={directForm.id_variante}
+                onChange={e => setDirectForm(f => ({ ...f, id_variante: e.target.value }))}
                 className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
               >
-                <option value="">— Selecciona un producto —</option>
-                {todosProductos.map(p => (
-                  <option key={p.id} value={p.id}>{p.nombre} ({p.sku})</option>
+                <option value="">— Selecciona una variante —</option>
+                {todasVariantes.map(v => (
+                  <option key={v.id} value={v.id}>
+                    {v.productos?.nombre} - [{v.sku}] {v.talla ? `T:${v.talla}` : ''} {v.color ? `C:${v.color}` : ''}
+                  </option>
                 ))}
               </select>
             </div>

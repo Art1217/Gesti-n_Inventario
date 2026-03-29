@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
 import { supabase } from '../lib/supabaseClient'
 import { Plus, Pencil, Trash2, X, Loader2, Truck, AlertCircle } from 'lucide-react'
@@ -107,7 +107,7 @@ export default function Proveedores() {
     <Layout>
       <div className="p-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div className="flex items-center gap-3">
             <Truck className="w-7 h-7 text-amber-400" />
             <div>
@@ -146,7 +146,8 @@ export default function Proveedores() {
               <p className="text-xs mt-1">Haz clic en "Nuevo Proveedor" para agregar uno.</p>
             </div>
           ) : (
-            <table className="w-full">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-gray-800">
                   <th className="text-left px-6 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Nombre</th>
@@ -183,6 +184,7 @@ export default function Proveedores() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       </div>

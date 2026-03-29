@@ -18,7 +18,7 @@ const NAV_VENDEDOR = [
   { to: '/pos', icon: ShoppingCart, label: 'Punto de Venta', roles: ['ADMIN', 'VENDEDOR'] },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ onCloseMobile, className = '' }) {
   const { userRole, user, signOut } = useAuth()
   const navigate = useNavigate()
 
@@ -38,7 +38,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-64 min-h-screen bg-gray-900 border-r border-gray-800 flex flex-col">
+    <aside className={`w-64 min-h-screen bg-gray-900 border-r border-gray-800 flex flex-col flex-shrink-0 ${className}`}>
       {/* Logo */}
       <div className="px-6 py-5 border-b border-gray-800">
         <div className="flex items-center gap-3">
@@ -58,6 +58,7 @@ export default function Sidebar() {
           <NavLink
             key={to}
             to={to}
+            onClick={onCloseMobile}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group ${
                 isActive

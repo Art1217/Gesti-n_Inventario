@@ -55,23 +55,23 @@ export default function TiendaPOS() {
     if (!texto.trim()) { setProductos([]); return }
     setSearching(true)
     try {
-      // Paso 1: Buscar IDs de productos que coincidan con nombre o SKU
-      const { data: productosBuscados, error: errProd } = await supabase
-        .from('productos')
-        .select('id')
-        .or(`nombre.ilike.%${texto}%,sku.ilike.%${texto}%`)
+      // Paso 1: Buscar IDs de variantes que coincidan con SKU, o cuyo producto padre coincida con el nombre
+      const { data: variantesBuscadas, error: errVar } = await supabase
+        .from('producto_variantes')
+        .select('id, productos!inner(nombre)')
+        .or(`sku.ilike.%${texto}%,productos.nombre.ilike.%${texto}%`)
         .limit(30)
       
-      if (errProd) throw errProd
-      if (!productosBuscados?.length) { setProductos([]); setSearching(false); return }
+      if (errVar) throw errVar
+      if (!variantesBuscadas?.length) { setProductos([]); setSearching(false); return }
 
-      const ids = productosBuscados.map(p => p.id)
+      const ids = variantesBuscadas.map(v => v.id)
 
-      // Paso 2: Traer estos productos desde inventario_tienda
+      // Paso 2: Traer estas variantes desde inventario_tienda
       const { data, error } = await supabase
         .from('inventario_tienda')
-        .select('*, productos(sku, nombre, categoria)')
-        .in('id_producto', ids)
+        .select('*, producto_variantes(*, productos(*))')
+        .in('id_variante', ids)
       
       if (error) throw error
       setProductos(data ?? [])
@@ -141,16 +141,18 @@ export default function TiendaPOS() {
   const agregarAlCarrito = (item) => {
     const pf = getPrecioFinal(item)
     setCarrito(prev => {
-      const existe = prev.find(c => c.id_producto === item.id_producto)
+      const existe = prev.find(c => c.id_variante === item.id_variante)
       if (existe) {
         if (existe.cantidad >= item.stock_exhibicion) return prev
-        return prev.map(c => c.id_producto === item.id_producto ? { ...c, cantidad: c.cantidad + 1 } : c)
+        return prev.map(c => c.id_variante === item.id_variante ? { ...c, cantidad: c.cantidad + 1 } : c)
       }
       if (item.stock_exhibicion <= 0) return prev
       return [...prev, {
-        id_producto: item.id_producto,
-        nombre: item.productos?.nombre,
-        sku: item.productos?.sku,
+        id_variante: item.id_variante,
+        nombre: item.producto_variantes?.productos?.nombre,
+        sku: item.producto_variantes?.sku,
+        talla: item.producto_variantes?.talla,
+        color: item.producto_variantes?.color,
         precio_final: pf,
         stock_max: item.stock_exhibicion,
         cantidad: 1,
@@ -160,11 +162,11 @@ export default function TiendaPOS() {
 
   const cambiarCantidad = (id, delta) => {
     setCarrito(prev => prev
-      .map(c => c.id_producto === id ? { ...c, cantidad: Math.min(c.stock_max, Math.max(1, c.cantidad + delta)) } : c)
+      .map(c => c.id_variante === id ? { ...c, cantidad: Math.min(c.stock_max, Math.max(1, c.cantidad + delta)) } : c)
     )
   }
 
-  const quitarDelCarrito = (id) => setCarrito(prev => prev.filter(c => c.id_producto !== id))
+  const quitarDelCarrito = (id) => setCarrito(prev => prev.filter(c => c.id_variante !== id))
 
   // --- Totales ---
   const subtotal = parseFloat(carrito.reduce((s, c) => s + c.precio_final * c.cantidad, 0).toFixed(2))
@@ -177,20 +179,20 @@ export default function TiendaPOS() {
     setProcessing(true)
     setError(null)
     try {
-      // 1. Descontar stock de cada producto vendido
+      // 1. Descontar stock de cada variante vendida
       const stockUpdates = carrito.map(item =>
         supabase
           .from('inventario_tienda')
           .update({ stock_exhibicion: item.stock_max - item.cantidad })
-          .eq('id_producto', item.id_producto)
+          .eq('id_variante', item.id_variante)
       )
       const stockResults = await Promise.all(stockUpdates)
       const stockError = stockResults.find(r => r.error)
       if (stockError) throw new Error(`Error al descontar stock: ${stockError.error.message}`)
 
-      // 2. Registrar un movimiento por cada producto de la venta
+      // 2. Registrar un movimiento por cada variante de la venta
       const movimientos = carrito.map(item => ({
-        id_producto: item.id_producto,
+        id_variante: item.id_variante,
         id_usuario: user.id,
         tipo_movimiento: 'VENTA',
         cantidad: item.cantidad,
@@ -308,23 +310,31 @@ export default function TiendaPOS() {
               </div>
             ) : (
               carrito.map(item => (
-                <div key={item.id_producto} className="bg-gray-800/60 border border-gray-700/60 rounded-xl p-3">
+                <div key={item.id_variante} className="bg-gray-800/60 border border-gray-700/60 rounded-xl p-3">
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex-1 min-w-0">
                       <p className="text-white text-sm font-medium truncate">{item.nombre}</p>
-                      <p className="text-gray-500 font-mono text-xs">{item.sku}</p>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                        <span className="text-indigo-400 font-mono text-xs truncate bg-gray-900 px-1.5 py-0.5 rounded border border-gray-700">{item.sku}</span>
+                        {(item.talla || item.color) && (
+                          <span className="text-gray-500 text-[10px] uppercase font-semibold">
+                            {item.talla ? `T:${item.talla} ` : ''} 
+                            {item.color ? `C:${item.color}` : ''}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <button onClick={() => quitarDelCarrito(item.id_producto)} className="text-gray-600 hover:text-red-400 transition-colors flex-shrink-0 mt-0.5">
+                    <button onClick={() => quitarDelCarrito(item.id_variante)} className="text-gray-600 hover:text-red-400 transition-colors flex-shrink-0 mt-0.5">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between mt-3">
                     <div className="flex items-center gap-1.5 bg-gray-900 rounded-lg border border-gray-700 p-0.5">
-                      <button onClick={() => cambiarCantidad(item.id_producto, -1)} className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors">
+                      <button onClick={() => cambiarCantidad(item.id_variante, -1)} className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors">
                         <Minus className="w-3 h-3" />
                       </button>
                       <span className="text-white text-sm w-6 text-center font-semibold">{item.cantidad}</span>
-                      <button onClick={() => cambiarCantidad(item.id_producto, 1)} disabled={item.cantidad >= item.stock_max} className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                      <button onClick={() => cambiarCantidad(item.id_variante, 1)} disabled={item.cantidad >= item.stock_max} className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
                         <Plus className="w-3 h-3" />
                       </button>
                     </div>
@@ -430,19 +440,27 @@ export default function TiendaPOS() {
               {productos.map(item => {
                 const pf = getPrecioFinal(item)
                 const sinStock = item.stock_exhibicion <= 0
-                const enCarrito = carrito.find(c => c.id_producto === item.id_producto)
+                const enCarrito = carrito.find(c => c.id_variante === item.id_variante)
                 const maxAlcanzado = enCarrito && enCarrito.cantidad >= item.stock_exhibicion
 
                 return (
                   <div
-                    key={item.id_producto}
+                    key={item.id_variante}
                     className={`bg-gray-900 border rounded-2xl p-4 flex flex-col gap-3 transition-all ${
                       sinStock ? 'border-gray-800 opacity-60' : 'border-gray-800 hover:border-gray-700 hover:shadow-lg hover:shadow-black/30'
                     }`}
                   >
                     <div className="flex-1">
-                      <p className="text-white font-semibold text-sm leading-tight">{item.productos?.nombre}</p>
-                      <p className="text-gray-500 font-mono text-xs mt-0.5">{item.productos?.sku}</p>
+                      <p className="text-white font-semibold text-sm leading-tight">{item.producto_variantes?.productos?.nombre}</p>
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                        <span className="bg-gray-800 text-indigo-300 px-2 py-0.5 rounded text-xs font-mono">{item.producto_variantes?.sku}</span>
+                        {(item.producto_variantes?.talla || item.producto_variantes?.color) && (
+                          <span className="text-gray-500 text-xs uppercase font-semibold">
+                            {item.producto_variantes.talla ? `T:${item.producto_variantes.talla} ` : ''} 
+                            {item.producto_variantes.color ? `C:${item.producto_variantes.color}` : ''}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex items-end justify-between gap-2">

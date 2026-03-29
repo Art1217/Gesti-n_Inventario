@@ -81,13 +81,13 @@ export default function AdminDashboard() {
 
     setChartsLoading(true)
     try {
-      const { data: ventasMov } = await supabase.from('movimientos').select('metodo_pago, total_final, cantidad, productos(nombre)').eq('tipo_movimiento', 'VENTA')
+      const { data: ventasMov } = await supabase.from('movimientos').select('metodo_pago, total_final, cantidad, producto_variantes(productos(nombre))').eq('tipo_movimiento', 'VENTA')
       const pagoMap = {}
       ;(ventasMov ?? []).forEach(m => { const key = m.metodo_pago ?? 'Sin método'; pagoMap[key] = (pagoMap[key] || 0) + (m.total_final || 0) })
       setPieData(Object.entries(pagoMap).map(([name, value]) => ({ name, value: parseFloat(value.toFixed(2)) })))
 
       const prodMap = {}
-      ;(ventasMov ?? []).forEach(m => { const nombre = m.productos?.nombre ?? 'Desconocido'; prodMap[nombre] = (prodMap[nombre] || 0) + (m.cantidad || 0) })
+      ;(ventasMov ?? []).forEach(m => { const nombre = m.producto_variantes?.productos?.nombre ?? 'Desconocido'; prodMap[nombre] = (prodMap[nombre] || 0) + (m.cantidad || 0) })
       const sorted = Object.entries(prodMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, vendidos]) => ({ name: name.length > 14 ? name.slice(0, 13) + '…' : name, vendidos }))
       setBarData(sorted)
     } finally { setChartsLoading(false) }
@@ -103,7 +103,7 @@ export default function AdminDashboard() {
 
       const { data } = await supabase
         .from('movimientos')
-        .select('*, productos(nombre, sku)')
+        .select('*, producto_variantes(sku, talla, color, productos(nombre))')
         .gte('created_at', start.toISOString())
         .lte('created_at', end.toISOString())
         .order('created_at', { ascending: false })
@@ -335,8 +335,16 @@ export default function AdminDashboard() {
                           </span>
                         </td>
                         <td className="px-6 py-3.5 print:td">
-                          <p className="text-white text-sm print:text-black">{mov.productos?.nombre ?? '—'}</p>
-                          <p className="text-gray-600 font-mono text-xs print:text-gray-800">{mov.productos?.sku}</p>
+                          <p className="text-white text-sm print:text-black">{mov.producto_variantes?.productos?.nombre ?? '—'}</p>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <span className="text-indigo-400 font-mono text-xs">{mov.producto_variantes?.sku}</span>
+                            {(mov.producto_variantes?.talla || mov.producto_variantes?.color) && (
+                              <span className="text-gray-500 text-[10px] uppercase">
+                                {mov.producto_variantes.talla ? `T:${mov.producto_variantes.talla} ` : ''} 
+                                {mov.producto_variantes.color ? `C:${mov.producto_variantes.color}` : ''}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-3.5 text-center text-gray-300 text-sm font-semibold print:td">{mov.cantidad}</td>
                         <td className="px-6 py-3.5 text-center text-gray-500 text-xs font-mono print:td">{mov.id_usuario?.substring(0, 8) ?? '—'}</td>

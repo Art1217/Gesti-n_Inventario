@@ -3,7 +3,7 @@ import { Html5Qrcode } from 'html5-qrcode'
 import Layout from '../components/Layout'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
-import { ScanLine, Search, PackagePlus, AlertCircle, X, Loader2, Database } from 'lucide-react'
+import { ScanLine, Search, PackagePlus, AlertCircle, CheckCircle, X, Loader2, Database } from 'lucide-react'
 
 function Modal({ title, onClose, children }) {
   return (
@@ -33,6 +33,7 @@ export default function AlmacenView() {
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState(null)
+  const [success, setSuccess] = useState(null)
   const scannerRef = useRef(null)
 
   const fetchStock = useCallback(async () => {
@@ -179,6 +180,9 @@ export default function AlmacenView() {
         })
       if (movError) throw movError
 
+      setSuccess(`¡Se agregaron ${amountToAdd} unidades correctamente!`)
+      setTimeout(() => setSuccess(null), 4000)
+
       closeModal()
       setManualSku('')
       fetchStock()
@@ -209,6 +213,16 @@ export default function AlmacenView() {
               <span>{error}</span>
             </div>
             <button onClick={() => setError(null)} className="text-red-400 hover:text-white"><X className="w-4 h-4"/></button>
+          </div>
+        )}
+
+        {success && !modalOpen && (
+          <div className="flex bg-emerald-950/50 border border-emerald-800 text-emerald-300 rounded-xl px-4 py-3 text-sm mb-6 items-center justify-between shadow-lg shadow-emerald-900/20">
+            <div className="flex items-center gap-2 font-medium">
+              <CheckCircle className="w-5 h-5 flex-shrink-0 text-emerald-400" />
+              <span>{success}</span>
+            </div>
+            <button onClick={() => setSuccess(null)} className="text-emerald-400 hover:text-emerald-300"><X className="w-4 h-4"/></button>
           </div>
         )}
 

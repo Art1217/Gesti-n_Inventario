@@ -19,8 +19,7 @@ const PAYMENT_METHODS = [
 ]
 
 function getPrecioFinal(item) {
-  const descuento = item.descuento_porcentaje || 0
-  return parseFloat((item.precio_venta * (1 - descuento / 100)).toFixed(2))
+  return parseFloat((item.precio_final || 0).toFixed(2))
 }
 
 export default function TiendaPOS() {
@@ -55,28 +54,60 @@ export default function TiendaPOS() {
     if (!texto.trim()) { setProductos([]); return }
     setSearching(true)
     try {
-      // Paso 1: Buscar IDs de variantes que coincidan con SKU, o cuyo producto padre coincida con el nombre
-      const { data: variantesBuscadas, error: errVar } = await supabase
+      // 1. Intentamos buscar por SKU primero (es lo más rápido en un POS)
+      let { data: resultados, error } = await supabase
         .from('producto_variantes')
-        .select('id, productos!inner(nombre)')
-        .or(`sku.ilike.%${texto}%,productos.nombre.ilike.%${texto}%`)
-        .limit(30)
-      
-      if (errVar) throw errVar
-      if (!variantesBuscadas?.length) { setProductos([]); setSearching(false); return }
+        .select(`
+          id,
+          sku,
+          talla,
+          color,
+          productos!inner (nombre, categoria),
+          inventario_tienda!inner (stock_exhibicion, precio_final)
+        `)
+        .ilike('sku', `%${texto}%`);
 
-      const ids = variantesBuscadas.map(v => v.id)
+      // 2. Si no hay resultados por SKU, buscamos por Nombre en la tabla relacionada
+      if (!error && (!resultados || resultados.length === 0)) {
+        const { data: resultadosNombre, error: errorNombre } = await supabase
+          .from('producto_variantes')
+          .select(`
+            id,
+            sku,
+            talla,
+            color,
+            productos!inner (nombre, categoria),
+            inventario_tienda!inner (stock_exhibicion, precio_final)
+          `)
+          .ilike('productos.nombre', `%${texto}%`);
+          
+        resultados = resultadosNombre;
+        error = errorNombre;
+      }
 
-      // Paso 2: Traer estas variantes desde inventario_tienda
-      const { data, error } = await supabase
-        .from('inventario_tienda')
-        .select('*, producto_variantes(*, productos(*))')
-        .in('id_variante', ids)
+      if (error) {
+        console.error("Error exacto de Supabase:", error.message || error);
+        setSearching(false);
+        return;
+      }
+
+      // Aplanar la respuesta de inventario_tienda para facilitar el renderizado del POS
+      const formatted = (resultados ?? []).map(v => {
+        const tienda = Array.isArray(v.inventario_tienda) ? v.inventario_tienda[0] : v.inventario_tienda
+        return {
+          id_variante: v.id,
+          sku: v.sku,
+          talla: v.talla,
+          color: v.color,
+          productos: v.productos,
+          stock_exhibicion: tienda?.stock_exhibicion || 0,
+          precio_final: tienda?.precio_final || 0
+        }
+      })
       
-      if (error) throw error
-      setProductos(data ?? [])
+      setProductos(formatted)
     } catch (e) {
-      console.error(e)
+      console.error('Error buscando productos POS:', e)
     } finally {
       setSearching(false)
     }
@@ -149,10 +180,10 @@ export default function TiendaPOS() {
       if (item.stock_exhibicion <= 0) return prev
       return [...prev, {
         id_variante: item.id_variante,
-        nombre: item.producto_variantes?.productos?.nombre,
-        sku: item.producto_variantes?.sku,
-        talla: item.producto_variantes?.talla,
-        color: item.producto_variantes?.color,
+        nombre: item.productos?.nombre,
+        sku: item.sku,
+        talla: item.talla,
+        color: item.color,
         precio_final: pf,
         stock_max: item.stock_exhibicion,
         cantidad: 1,
@@ -451,13 +482,13 @@ export default function TiendaPOS() {
                     }`}
                   >
                     <div className="flex-1">
-                      <p className="text-white font-semibold text-sm leading-tight">{item.producto_variantes?.productos?.nombre}</p>
+                      <p className="text-white font-semibold text-sm leading-tight">{item.productos?.nombre}</p>
                       <div className="flex flex-wrap items-center gap-2 mt-1">
-                        <span className="bg-gray-800 text-indigo-300 px-2 py-0.5 rounded text-xs font-mono">{item.producto_variantes?.sku}</span>
-                        {(item.producto_variantes?.talla || item.producto_variantes?.color) && (
+                        <span className="bg-gray-800 text-indigo-300 px-2 py-0.5 rounded text-xs font-mono">{item.sku}</span>
+                        {(item.talla || item.color) && (
                           <span className="text-gray-500 text-xs uppercase font-semibold">
-                            {item.producto_variantes.talla ? `T:${item.producto_variantes.talla} ` : ''} 
-                            {item.producto_variantes.color ? `C:${item.producto_variantes.color}` : ''}
+                            {item.talla ? `T:${item.talla} ` : ''} 
+                            {item.color ? `C:${item.color}` : ''}
                           </span>
                         )}
                       </div>
@@ -465,15 +496,7 @@ export default function TiendaPOS() {
 
                     <div className="flex items-end justify-between gap-2">
                       <div>
-                        {item.descuento_porcentaje > 0 && (
-                          <p className="text-gray-600 text-xs line-through font-mono">S/ {item.precio_venta.toFixed(2)}</p>
-                        )}
                         <p className="text-emerald-400 font-bold text-lg font-mono">S/ {pf.toFixed(2)}</p>
-                        {item.descuento_porcentaje > 0 && (
-                          <span className="text-[10px] bg-rose-500/15 text-rose-400 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-semibold">
-                            -{item.descuento_porcentaje}%
-                          </span>
-                        )}
                       </div>
 
                       <div className="text-right">

@@ -72,8 +72,8 @@ export default function AdminDashboard() {
       const [ventasRes, opHoyRes, critAlmRes, critTiendaRes] = await Promise.all([
         supabase.from('movimientos').select('total_final').eq('tipo_movimiento', 'VENTA').gte('created_at', hoyStart.toISOString()).lte('created_at', hoyEnd.toISOString()),
         supabase.from('movimientos').select('id', { count: 'exact', head: true }).gte('created_at', hoyStart.toISOString()).lte('created_at', hoyEnd.toISOString()),
-        supabase.from('inventario_almacen').select('id_producto', { count: 'exact', head: true }).lt('stock_fisico', 10),
-        supabase.from('inventario_tienda').select('id_producto', { count: 'exact', head: true }).lt('stock_exhibicion', 5),
+        supabase.from('inventario_almacen').select('id_variante', { count: 'exact', head: true }).lt('stock_fisico', 10),
+        supabase.from('inventario_tienda').select('id_variante', { count: 'exact', head: true }).lt('stock_exhibicion', 5),
       ])
       const ventasHoy = (ventasRes.data ?? []).reduce((s, r) => s + (r.total_final || 0), 0)
       setKpi({ ventasHoy, opHoy: opHoyRes.count ?? 0, critAlmacen: critAlmRes.count ?? 0, critTienda: critTiendaRes.count ?? 0 })

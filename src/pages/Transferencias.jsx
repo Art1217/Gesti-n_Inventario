@@ -90,44 +90,17 @@ export default function Transferencias() {
 
     try {
       if (cantidad <= 0) throw new Error('La cantidad debe ser mayor a cero.')
-      if (cantidad > item.stock_fisico) throw new Error(`No puedes transferir más de ${item.stock_fisico} unidades disponibles.`)
 
-      // 1. Restar del almacén
-      const { error: errAlm } = await supabase
-        .from('inventario_almacen')
-        .update({ stock_fisico: item.stock_fisico - cantidad })
-        .eq('id_variante', item.id_variante)
-      if (errAlm) throw errAlm
-
-      // 2. Sumar a tienda (upsert)
-      const { data: tiendaActual, error: errCheck } = await supabase
-        .from('inventario_tienda')
-        .select('stock_exhibicion')
-        .eq('id_variante', item.id_variante)
-        .limit(1)
-      if (errCheck) throw errCheck
-
-      if (tiendaActual?.length > 0) {
-        const { error: errUpd } = await supabase
-          .from('inventario_tienda')
-          .update({ stock_exhibicion: tiendaActual[0].stock_exhibicion + cantidad })
-          .eq('id_variante', item.id_variante)
-        if (errUpd) throw errUpd
-      } else {
-        const { error: errIns } = await supabase
-          .from('inventario_tienda')
-          .insert({ id_variante: item.id_variante, stock_exhibicion: cantidad, precio_venta: 0, descuento_porcentaje: 0 })
-        if (errIns) throw errIns
-      }
-
-      // 3. Movimiento
-      const { error: errMov } = await supabase.from('movimientos').insert({
-        id_variante: item.id_variante,
-        id_usuario: user.id,
-        tipo_movimiento: 'TRANSFERENCIA',
-        cantidad,
+      // RPC atómica: valida stock real, descuenta almacén, suma tienda
+      // e inserta movimiento en una sola transacción
+      const { data, error } = await supabase.rpc('procesar_transferencia', {
+        p_id_variante: item.id_variante,
+        p_cantidad: cantidad,
+        p_id_usuario: user.id,
       })
-      if (errMov) throw errMov
+
+      if (error) throw new Error(error.message)
+      if (!data?.ok) throw new Error(data?.error ?? 'Error al transferir')
 
       setTransfModal(null)
       setCantTransf('')
@@ -152,33 +125,15 @@ export default function Transferencias() {
       if (!id_variante) throw new Error('Selecciona un producto.')
       if (cantidad <= 0) throw new Error('La cantidad debe ser mayor a cero.')
 
-      const { data: tiendaActual, error: errCheck } = await supabase
-        .from('inventario_tienda')
-        .select('stock_exhibicion')
-        .eq('id_variante', id_variante)
-        .limit(1)
-      if (errCheck) throw errCheck
-
-      if (tiendaActual?.length > 0) {
-        const { error: errUpd } = await supabase
-          .from('inventario_tienda')
-          .update({ stock_exhibicion: tiendaActual[0].stock_exhibicion + cantidad })
-          .eq('id_variante', id_variante)
-        if (errUpd) throw errUpd
-      } else {
-        const { error: errIns } = await supabase
-          .from('inventario_tienda')
-          .insert({ id_variante, stock_exhibicion: cantidad, precio_venta: 0, descuento_porcentaje: 0 })
-        if (errIns) throw errIns
-      }
-
-      const { error: errMov } = await supabase.from('movimientos').insert({
-        id_variante,
-        id_usuario: user.id,
-        tipo_movimiento: 'INGRESO_DIRECTO_ADMIN',
-        cantidad,
+      // RPC atómica: upsert en tienda e inserta movimiento en una sola transacción
+      const { data, error } = await supabase.rpc('procesar_ingreso_directo_tienda', {
+        p_id_variante: id_variante,
+        p_cantidad: cantidad,
+        p_id_usuario: user.id,
       })
-      if (errMov) throw errMov
+
+      if (error) throw new Error(error.message)
+      if (!data?.ok) throw new Error(data?.error ?? 'Error al ingresar a tienda')
 
       const varInst = todasVariantes.find(p => p.id === id_variante)
       setDirectModal(false)

@@ -141,50 +141,24 @@ export default function AlmacenView() {
     e.preventDefault()
     setProcessing(true)
     setError(null)
-    
+
     try {
       const amountToAdd = parseInt(form.cantidad)
       if (amountToAdd <= 0) throw new Error("Cantidad inválida")
 
-      const { data: currentStockData, error: checkError } = await supabase
-        .from('inventario_almacen')
-        .select('*')
-        .eq('id_variante', scannedProduct.id)
-        .limit(1)
-        
-      if (checkError) throw checkError
-      
-      const currentStock = currentStockData?.[0]
-      let newTotalStock = amountToAdd
-      
-      if (currentStock) {
-        newTotalStock += currentStock.stock_fisico
-        const { error: updateError } = await supabase
-          .from('inventario_almacen')
-          .update({ stock_fisico: newTotalStock })
-          .eq('id_variante', scannedProduct.id)
-        if (updateError) throw updateError
-      } else {
-        const { error: insertError } = await supabase
-          .from('inventario_almacen')
-          .insert({ id_variante: scannedProduct.id, stock_fisico: newTotalStock, costo_unitario: 0 })
-        if (insertError) throw insertError
-      }
+      // RPC atómica: upsert en almacén e inserta movimiento ENTRADA
+      // en una sola transacción (si falla, revierte todo)
+      const { data, error } = await supabase.rpc('procesar_entrada_almacen', {
+        p_id_variante: scannedProduct.id,
+        p_cantidad: amountToAdd,
+        p_id_usuario: user.id,
+      })
 
-      const { error: movError } = await supabase
-        .from('movimientos')
-        .insert({
-          id_variante: scannedProduct.id,
-          id_usuario: user.id,
-          tipo_movimiento: 'ENTRADA',
-          cantidad: amountToAdd,
-          motivo_detalle: 'Ingreso manual por escáner/formulario'
-        })
-      if (movError) throw movError
+      if (error) throw new Error(error.message)
+      if (!data?.ok) throw new Error(data?.error ?? 'Error al registrar el ingreso')
 
       setSuccess(`¡Se agregaron ${amountToAdd} unidades correctamente!`)
       setTimeout(() => setSuccess(null), 4000)
-
       closeModal()
       setManualSku('')
       fetchStock()

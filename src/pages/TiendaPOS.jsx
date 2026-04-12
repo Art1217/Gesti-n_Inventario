@@ -212,33 +212,26 @@ export default function TiendaPOS() {
     setProcessing(true)
     setError(null)
     try {
-      // 1. Descontar stock de cada variante vendida
-      const stockUpdates = carrito.map(item =>
-        supabase
-          .from('inventario_tienda')
-          .update({ stock_exhibicion: item.stock_max - item.cantidad })
-          .eq('id_variante', item.id_variante)
-      )
-      const stockResults = await Promise.all(stockUpdates)
-      const stockError = stockResults.find(r => r.error)
-      if (stockError) throw new Error(`Error al descontar stock: ${stockError.error.message}`)
-
-      // 2. Registrar un movimiento por cada variante de la venta
-      const movimientos = carrito.map(item => ({
+      // Una sola llamada RPC que valida stock actual, descuenta e inserta
+      // movimientos en una transacción atómica (si falla algo, revierte todo)
+      const items = carrito.map(item => ({
         id_variante: item.id_variante,
-        id_usuario: user.id,
-        tipo_movimiento: 'VENTA',
         cantidad: item.cantidad,
-        metodo_pago: metodoPago,
         subtotal: parseFloat((item.precio_final * item.cantidad).toFixed(2)),
         igv: parseFloat((item.precio_final * item.cantidad * IGV_RATE).toFixed(2)),
         total_final: parseFloat((item.precio_final * item.cantidad * (1 + IGV_RATE)).toFixed(2)),
       }))
 
-      const { error: movError } = await supabase.from('movimientos').insert(movimientos)
-      if (movError) throw new Error(`Error al registrar movimiento: ${movError.message}`)
+      const { data, error } = await supabase.rpc('procesar_venta', {
+        p_items: items,
+        p_id_usuario: user.id,
+        p_metodo_pago: metodoPago,
+      })
 
-      setFinalTotal(total)   // ← capturar ANTES de limpiar el carrito
+      if (error) throw new Error(error.message)
+      if (!data?.ok) throw new Error(data?.error ?? 'Error al procesar la venta')
+
+      setFinalTotal(total)
       setVentaOk(true)
       setCarrito([])
       setQuery('')

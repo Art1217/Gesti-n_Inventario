@@ -34,7 +34,9 @@ export function AuthProvider({ children }) {
       if (session?.user) fetchUserRole(session.user.id)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // INITIAL_SESSION ya fue manejado por getSession() arriba — evita doble query
+      if (event === 'INITIAL_SESSION') return
       setSession(session)
       if (session?.user) {
         fetchUserRole(session.user.id)

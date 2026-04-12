@@ -28,6 +28,7 @@ export default function AdminFinanzas() {
             inventario_tienda(precio_venta, descuento_porcentaje)
           )
         `)
+        .eq('activo', true)
         .order('nombre')
 
       if (error) throw error

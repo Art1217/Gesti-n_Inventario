@@ -51,7 +51,8 @@ export default function Transferencias() {
     try {
       const { data, error } = await supabase
         .from('inventario_almacen')
-        .select('*, producto_variantes(*, productos(*))')
+        .select('*, producto_variantes!inner(*, productos!inner(*))')
+        .eq('producto_variantes.productos.activo', true)
         .gt('stock_fisico', 0)
         .order('stock_fisico', { ascending: false })
       if (error) throw error
@@ -65,7 +66,7 @@ export default function Transferencias() {
 
   const fetchTodasVariantes = useCallback(async () => {
     if (!isAdmin) return
-    const { data } = await supabase.from('producto_variantes').select('*, productos(nombre)').order('sku')
+    const { data } = await supabase.from('producto_variantes').select('*, productos!inner(nombre, activo)').eq('productos.activo', true).order('sku')
     setTodasVariantes(data ?? [])
   }, [isAdmin])
 

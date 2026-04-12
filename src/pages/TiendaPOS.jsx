@@ -65,6 +65,7 @@ export default function TiendaPOS() {
           productos!inner (nombre, categoria),
           inventario_tienda!inner (stock_exhibicion, precio_final)
         `)
+        .eq('productos.activo', true)
         .ilike('sku', `%${texto}%`);
 
       // 2. Si no hay resultados por SKU, buscamos por Nombre en la tabla relacionada
@@ -79,6 +80,7 @@ export default function TiendaPOS() {
             productos!inner (nombre, categoria),
             inventario_tienda!inner (stock_exhibicion, precio_final)
           `)
+          .eq('productos.activo', true)
           .ilike('productos.nombre', `%${texto}%`);
           
         resultados = resultadosNombre;

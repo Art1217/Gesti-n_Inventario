@@ -41,7 +41,8 @@ export default function AlmacenView() {
     try {
       const { data, error } = await supabase
         .from('inventario_almacen')
-        .select('*, producto_variantes(*, productos(*))')
+        .select('*, producto_variantes!inner(*, productos!inner(*))')
+        .eq('producto_variantes.productos.activo', true)
       if (error) throw error
       setStock(data ?? [])
     } catch(err) {
@@ -71,8 +72,9 @@ export default function AlmacenView() {
     try {
       const { data, error } = await supabase
         .from('producto_variantes')
-        .select('*, productos(nombre)')
+        .select('*, productos!inner(nombre, activo)')
         .eq('sku', sku)
+        .eq('productos.activo', true)
         .limit(1)
 
       if (error) throw error

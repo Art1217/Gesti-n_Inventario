@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
 import { supabase } from '../lib/supabaseClient'
-import { Plus, Pencil, Trash2, X, Loader2, BookOpen, AlertCircle, Search, Barcode as BarcodeIcon, Printer } from 'lucide-react'
+import { Plus, Pencil, Trash2, RefreshCw, X, Loader2, BookOpen, AlertCircle, Search, Barcode as BarcodeIcon, Printer } from 'lucide-react'
 import Barcode from 'react-barcode'
 
 const EMPTY_FORM = { nombre: '', categoria: '', id_proveedor: '', variantes: [{ sku: '', talla: '', color: '' }] }
@@ -49,14 +49,20 @@ export default function Catalogo() {
   const [editingId, setEditingId]     = useState(null)
   const [form, setForm]               = useState(EMPTY_FORM)
   const [search, setSearch]           = useState('')
+  const [mostrarInactivos, setMostrarInactivos] = useState(false)
   const [barcodeProduct, setBarcodeProduct] = useState(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
+      let prodQuery = supabase.from('productos').select('*, proveedores(nombre), producto_variantes(*)').order('nombre')
+      if (!mostrarInactivos) {
+        prodQuery = prodQuery.eq('activo', true)
+      }
+
       const [prodRes, provRes] = await Promise.all([
-        supabase.from('productos').select('*, proveedores(nombre), producto_variantes(*)').order('nombre'),
+        prodQuery,
         supabase.from('proveedores').select('id, nombre').order('nombre'),
       ])
       if (prodRes.error) throw prodRes.error
@@ -68,7 +74,7 @@ export default function Catalogo() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [mostrarInactivos])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -144,11 +150,12 @@ export default function Catalogo() {
   const addVariante = () => setForm(prev => ({ ...prev, variantes: [...prev.variantes, { sku: '', talla: '', color: '' }] }))
   const removeVariante = (index) => setForm(prev => ({ ...prev, variantes: prev.variantes.filter((_, i) => i !== index) }))
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('¿Eliminar este producto? Esta acción no se puede deshacer.')) return
+  const handleToggleActivo = async (id, currentActivo) => {
+    const action = currentActivo ? 'desactivar' : 'reactivar'
+    if (!window.confirm(`¿Estás seguro de que quieres ${action} este producto?`)) return
     setError(null)
     try {
-      const { error } = await supabase.from('productos').delete().eq('id', id)
+      const { error } = await supabase.from('productos').update({ activo: !currentActivo }).eq('id', id)
       if (error) throw error
       fetchData()
     } catch (err) {
@@ -170,7 +177,7 @@ export default function Catalogo() {
     <Layout>
       <div className="p-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4">
           <div className="flex items-center gap-3">
             <BookOpen className="w-7 h-7 text-indigo-400" />
             <div>
@@ -178,13 +185,25 @@ export default function Catalogo() {
               <p className="text-gray-500 text-sm">{productos.length} producto{productos.length !== 1 ? 's' : ''} registrado{productos.length !== 1 ? 's' : ''}</p>
             </div>
           </div>
-          <button
-            onClick={openCreate}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Nuevo Producto
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMostrarInactivos(!mostrarInactivos)}
+              className={`flex items-center gap-2 px-3 py-2.5 text-sm font-semibold rounded-xl transition-colors ${
+                mostrarInactivos 
+                  ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' 
+                  : 'text-gray-400 hover:text-white border border-gray-700 hover:bg-gray-800'
+              }`}
+            >
+              Inactivos: {mostrarInactivos ? 'ON' : 'OFF'}
+            </button>
+            <button
+              onClick={openCreate}
+              className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Nuevo Producto
+            </button>
+          </div>
         </div>
 
         {/* Barra de búsqueda */}
@@ -234,7 +253,7 @@ export default function Catalogo() {
                 </thead>
                 <tbody className="divide-y divide-gray-800/60">
                   {filteredProductos.map((p) => (
-                    <tr key={p.id} className="hover:bg-gray-800/30 transition-colors">
+                    <tr key={p.id} className={`hover:bg-gray-800/30 transition-colors ${p.activo === false ? 'opacity-50 grayscale' : ''}`}>
                       <td className="px-6 py-4">
                         <div className="flex flex-col gap-2">
                           {(p.producto_variantes || []).length === 0 ? <span className="text-gray-500 text-xs">—</span> : null}
@@ -268,9 +287,15 @@ export default function Catalogo() {
                           <button onClick={() => openEdit(p)} className="p-1.5 text-gray-500 hover:text-indigo-400 hover:bg-indigo-400/10 rounded-lg transition-all" title="Editar">
                             <Pencil className="w-4 h-4" />
                           </button>
-                          <button onClick={() => handleDelete(p.id)} className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all" title="Eliminar">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {p.activo !== false ? (
+                            <button onClick={() => handleToggleActivo(p.id, true)} className="p-1.5 text-gray-500 hover:text-amber-400 hover:bg-amber-400/10 rounded-lg transition-all" title="Desactivar">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <button onClick={() => handleToggleActivo(p.id, false)} className="p-1.5 text-gray-500 hover:text-emerald-400 hover:bg-emerald-400/10 rounded-lg transition-all" title="Reactivar">
+                              <RefreshCw className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

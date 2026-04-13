@@ -14,7 +14,7 @@
 --    - Registra un movimiento VENTA por cada ítem
 --    - Si CUALQUIER ítem falla, revierte TODO (transacción completa)
 -- ----------------------------------------------------------------
-CREATE OR REPLACE FUNCTION procesar_venta(
+CREATE OR REPLACE FUNCTION public.procesar_venta(
   p_items       jsonb,   -- [{ id_variante, cantidad, subtotal, igv, total_final }]
   p_id_usuario  uuid,
   p_metodo_pago text
@@ -22,6 +22,7 @@ CREATE OR REPLACE FUNCTION procesar_venta(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = ''
 AS $$
 DECLARE
   v_row         record;
@@ -37,7 +38,7 @@ BEGIN
     -- Bloquear fila: previene que otra transacción concurrente
     -- lea el mismo stock antes de que lo actualicemos
     SELECT stock_exhibicion INTO v_stock
-    FROM inventario_tienda
+    FROM public.inventario_tienda
     WHERE id_variante = v_id_variante
     FOR UPDATE;
 
@@ -52,12 +53,12 @@ BEGIN
     END IF;
 
     -- Decremento atómico
-    UPDATE inventario_tienda
+    UPDATE public.inventario_tienda
     SET stock_exhibicion = stock_exhibicion - v_cantidad
     WHERE id_variante = v_id_variante;
 
     -- Movimiento en la misma transacción
-    INSERT INTO movimientos (
+    INSERT INTO public.movimientos (
       id_variante, id_usuario, tipo_movimiento,
       cantidad, metodo_pago, subtotal, igv, total_final
     ) VALUES (
@@ -88,7 +89,7 @@ $$;
 --    - Suma a inventario_tienda (crea el registro si no existe)
 --    - Registra movimiento TRANSFERENCIA
 -- ----------------------------------------------------------------
-CREATE OR REPLACE FUNCTION procesar_transferencia(
+CREATE OR REPLACE FUNCTION public.procesar_transferencia(
   p_id_variante uuid,
   p_cantidad    int,
   p_id_usuario  uuid
@@ -96,13 +97,14 @@ CREATE OR REPLACE FUNCTION procesar_transferencia(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = ''
 AS $$
 DECLARE
   v_stock int;
 BEGIN
   -- Bloquear fila del almacén
   SELECT stock_fisico INTO v_stock
-  FROM inventario_almacen
+  FROM public.inventario_almacen
   WHERE id_variante = p_id_variante
   FOR UPDATE;
 
@@ -116,18 +118,18 @@ BEGIN
   END IF;
 
   -- Descontar del almacén
-  UPDATE inventario_almacen
+  UPDATE public.inventario_almacen
   SET stock_fisico = stock_fisico - p_cantidad
   WHERE id_variante = p_id_variante;
 
   -- Sumar a tienda (crea el registro si no existe)
-  INSERT INTO inventario_tienda (id_variante, stock_exhibicion, precio_venta, descuento_porcentaje)
+  INSERT INTO public.inventario_tienda (id_variante, stock_exhibicion, precio_venta, descuento_porcentaje)
   VALUES (p_id_variante, p_cantidad, 0, 0)
   ON CONFLICT (id_variante)
-  DO UPDATE SET stock_exhibicion = inventario_tienda.stock_exhibicion + p_cantidad;
+  DO UPDATE SET stock_exhibicion = public.inventario_tienda.stock_exhibicion + p_cantidad;
 
   -- Movimiento
-  INSERT INTO movimientos (id_variante, id_usuario, tipo_movimiento, cantidad)
+  INSERT INTO public.movimientos (id_variante, id_usuario, tipo_movimiento, cantidad)
   VALUES (p_id_variante, p_id_usuario, 'TRANSFERENCIA', p_cantidad);
 
   RETURN jsonb_build_object('ok', true);
@@ -144,7 +146,7 @@ $$;
 --    - Suma stock a inventario_almacen (crea si no existe)
 --    - Registra movimiento ENTRADA
 -- ----------------------------------------------------------------
-CREATE OR REPLACE FUNCTION procesar_entrada_almacen(
+CREATE OR REPLACE FUNCTION public.procesar_entrada_almacen(
   p_id_variante uuid,
   p_cantidad    int,
   p_id_usuario  uuid
@@ -152,16 +154,17 @@ CREATE OR REPLACE FUNCTION procesar_entrada_almacen(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = ''
 AS $$
 BEGIN
   -- Upsert atómico: incrementa si existe, crea si no
-  INSERT INTO inventario_almacen (id_variante, stock_fisico, costo_unitario)
+  INSERT INTO public.inventario_almacen (id_variante, stock_fisico, costo_unitario)
   VALUES (p_id_variante, p_cantidad, 0)
   ON CONFLICT (id_variante)
-  DO UPDATE SET stock_fisico = inventario_almacen.stock_fisico + p_cantidad;
+  DO UPDATE SET stock_fisico = public.inventario_almacen.stock_fisico + p_cantidad;
 
   -- Movimiento
-  INSERT INTO movimientos (id_variante, id_usuario, tipo_movimiento, cantidad, motivo_detalle)
+  INSERT INTO public.movimientos (id_variante, id_usuario, tipo_movimiento, cantidad, motivo_detalle)
   VALUES (p_id_variante, p_id_usuario, 'ENTRADA', p_cantidad, 'Ingreso manual por escáner/formulario');
 
   RETURN jsonb_build_object('ok', true);
@@ -178,7 +181,7 @@ $$;
 --    - Suma stock a inventario_tienda (crea si no existe)
 --    - Registra movimiento INGRESO_DIRECTO_ADMIN
 -- ----------------------------------------------------------------
-CREATE OR REPLACE FUNCTION procesar_ingreso_directo_tienda(
+CREATE OR REPLACE FUNCTION public.procesar_ingreso_directo_tienda(
   p_id_variante uuid,
   p_cantidad    int,
   p_id_usuario  uuid
@@ -186,16 +189,17 @@ CREATE OR REPLACE FUNCTION procesar_ingreso_directo_tienda(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = ''
 AS $$
 BEGIN
   -- Upsert atómico
-  INSERT INTO inventario_tienda (id_variante, stock_exhibicion, precio_venta, descuento_porcentaje)
+  INSERT INTO public.inventario_tienda (id_variante, stock_exhibicion, precio_venta, descuento_porcentaje)
   VALUES (p_id_variante, p_cantidad, 0, 0)
   ON CONFLICT (id_variante)
-  DO UPDATE SET stock_exhibicion = inventario_tienda.stock_exhibicion + p_cantidad;
+  DO UPDATE SET stock_exhibicion = public.inventario_tienda.stock_exhibicion + p_cantidad;
 
   -- Movimiento
-  INSERT INTO movimientos (id_variante, id_usuario, tipo_movimiento, cantidad)
+  INSERT INTO public.movimientos (id_variante, id_usuario, tipo_movimiento, cantidad)
   VALUES (p_id_variante, p_id_usuario, 'INGRESO_DIRECTO_ADMIN', p_cantidad);
 
   RETURN jsonb_build_object('ok', true);

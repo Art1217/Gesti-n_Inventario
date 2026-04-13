@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
-import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../context/AuthContext'
+import { getVariantesActivas } from '../services/productos.service'
+import { getStockAlmacen, procesarTransferencia, procesarIngresoDirectoTienda } from '../services/inventario.service'
 import {
   ArrowRightLeft, PackagePlus, X, Loader2, AlertCircle,
   CheckCircle, Warehouse, Store, Zap
@@ -49,14 +50,8 @@ export default function Transferencias() {
   const fetchAlmacen = useCallback(async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('inventario_almacen')
-        .select('*, producto_variantes!inner(*, productos!inner(*))')
-        .eq('producto_variantes.productos.activo', true)
-        .gt('stock_fisico', 0)
-        .order('stock_fisico', { ascending: false })
-      if (error) throw error
-      setStockAlmacen(data ?? [])
+      const data = await getStockAlmacen({ soloConStock: true })
+      setStockAlmacen(data)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -66,8 +61,12 @@ export default function Transferencias() {
 
   const fetchTodasVariantes = useCallback(async () => {
     if (!isAdmin) return
-    const { data } = await supabase.from('producto_variantes').select('*, productos!inner(nombre, activo)').eq('productos.activo', true).order('sku')
-    setTodasVariantes(data ?? [])
+    try {
+      const data = await getVariantesActivas()
+      setTodasVariantes(data)
+    } catch (e) {
+      console.error('Error cargando variantes:', e)
+    }
   }, [isAdmin])
 
   useEffect(() => {
@@ -91,16 +90,7 @@ export default function Transferencias() {
     try {
       if (cantidad <= 0) throw new Error('La cantidad debe ser mayor a cero.')
 
-      // RPC atómica: valida stock real, descuenta almacén, suma tienda
-      // e inserta movimiento en una sola transacción
-      const { data, error } = await supabase.rpc('procesar_transferencia', {
-        p_id_variante: item.id_variante,
-        p_cantidad: cantidad,
-        p_id_usuario: user.id,
-      })
-
-      if (error) throw new Error(error.message)
-      if (!data?.ok) throw new Error(data?.error ?? 'Error al transferir')
+      await procesarTransferencia(item.id_variante, cantidad, user.id)
 
       setTransfModal(null)
       setCantTransf('')
@@ -125,15 +115,7 @@ export default function Transferencias() {
       if (!id_variante) throw new Error('Selecciona un producto.')
       if (cantidad <= 0) throw new Error('La cantidad debe ser mayor a cero.')
 
-      // RPC atómica: upsert en tienda e inserta movimiento en una sola transacción
-      const { data, error } = await supabase.rpc('procesar_ingreso_directo_tienda', {
-        p_id_variante: id_variante,
-        p_cantidad: cantidad,
-        p_id_usuario: user.id,
-      })
-
-      if (error) throw new Error(error.message)
-      if (!data?.ok) throw new Error(data?.error ?? 'Error al ingresar a tienda')
+      await procesarIngresoDirectoTienda(id_variante, cantidad, user.id)
 
       const varInst = todasVariantes.find(p => p.id === id_variante)
       setDirectModal(false)

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
-import { supabase } from '../lib/supabaseClient'
+import { getProductosConVariantes, crearProducto, actualizarProducto, toggleProductoActivo, upsertVariantes } from '../services/productos.service'
+import { getProveedoresSimple } from '../services/proveedores.service'
 import { Plus, Pencil, Trash2, RefreshCw, X, Loader2, BookOpen, AlertCircle, Search, Barcode as BarcodeIcon, Printer } from 'lucide-react'
 import Barcode from 'react-barcode'
 
@@ -56,19 +57,12 @@ export default function Catalogo() {
     setLoading(true)
     setError(null)
     try {
-      let prodQuery = supabase.from('productos').select('*, proveedores(nombre), producto_variantes(*)').order('nombre')
-      if (!mostrarInactivos) {
-        prodQuery = prodQuery.eq('activo', true)
-      }
-
-      const [prodRes, provRes] = await Promise.all([
-        prodQuery,
-        supabase.from('proveedores').select('id, nombre').order('nombre'),
+      const [prods, provs] = await Promise.all([
+        getProductosConVariantes(mostrarInactivos),
+        getProveedoresSimple(),
       ])
-      if (prodRes.error) throw prodRes.error
-      if (provRes.error) throw provRes.error
-      setProductos(prodRes.data ?? [])
-      setProveedores(provRes.data ?? [])
+      setProductos(prods)
+      setProveedores(provs)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -108,27 +102,18 @@ export default function Catalogo() {
     try {
       let prodId = editingId
       if (editingId) {
-        const { error } = await supabase.from('productos').update(payloadProd).eq('id', editingId)
-        if (error) throw error
+        await actualizarProducto(editingId, payloadProd)
       } else {
-        const { data, error } = await supabase.from('productos').insert(payloadProd).select().single()
-        if (error) throw error
-        prodId = data.id
+        const prod = await crearProducto(payloadProd)
+        prodId = prod.id
       }
 
-      // Variantes Upsert
       const varPayload = form.variantes.map(v => {
-        const res = {
-          id_producto: prodId,
-          sku: v.sku,
-          talla: v.talla || null,
-          color: v.color || null
-        }
+        const res = { id_producto: prodId, sku: v.sku, talla: v.talla || null, color: v.color || null }
         if (v.id) res.id = v.id
         return res
       })
-      const { error: varError } = await supabase.from('producto_variantes').upsert(varPayload)
-      if (varError) throw varError
+      await upsertVariantes(varPayload)
 
       closeModal()
       fetchData()
@@ -155,8 +140,7 @@ export default function Catalogo() {
     if (!window.confirm(`¿Estás seguro de que quieres ${action} este producto?`)) return
     setError(null)
     try {
-      const { error } = await supabase.from('productos').update({ activo: !currentActivo }).eq('id', id)
-      if (error) throw error
+      await toggleProductoActivo(id, currentActivo)
       fetchData()
     } catch (err) {
       setError(err.message)

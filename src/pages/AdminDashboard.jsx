@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
-import { supabase } from '../lib/supabaseClient'
+import { getKpis, getVentasParaGraficos, getMovimientosPorFecha, MOVIMIENTOS_PAGE_SIZE } from '../services/movimientos.service'
+import { getStockCriticoAlmacen, getStockCriticoTienda } from '../services/inventario.service'
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid
@@ -27,9 +28,12 @@ function Skeleton({ className = '' }) {
 }
 
 // ─── KPI Card ──────────────────────────────────────────────
-function KpiCard({ title, value, sub, icon: Icon, color, loading, alert }) {
+function KpiCard({ title, value, sub, icon: Icon, color, loading, alert, onClick }) {
   return (
-    <div className={`bg-gray-900 border rounded-2xl p-5 flex flex-col gap-3 ${alert ? 'border-red-800/60' : 'border-gray-800'}`}>
+    <div
+      onClick={onClick}
+      className={`bg-gray-900 border rounded-2xl p-5 flex flex-col gap-3 ${alert ? 'border-red-800/60' : 'border-gray-800'} ${onClick ? 'cursor-pointer hover:bg-gray-800/60 transition-colors' : ''}`}
+    >
       <div className="flex items-center justify-between">
         <p className="text-gray-500 text-sm font-medium">{title}</p>
         <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${color}`}>
@@ -55,6 +59,8 @@ export default function AdminDashboard() {
 
   const [movimientos, setMovimientos] = useState([])
   const [movLoading, setMovLoading] = useState(true)
+  const [movCount, setMovCount] = useState(0)
+  const [page, setPage] = useState(1)
 
   const [filtroFecha, setFiltroFecha] = useState(() => {
     const d = new Date()
@@ -62,63 +68,74 @@ export default function AdminDashboard() {
     return d.toISOString().slice(0, 10)
   })
 
+  const totalPages = Math.max(1, Math.ceil(movCount / MOVIMIENTOS_PAGE_SIZE))
+
+  // ── Modal stock crítico ──
+  const [critModal, setCritModal] = useState(null) // 'almacen' | 'tienda' | null
+  const [critItems, setCritItems] = useState([])
+  const [critLoading, setCritLoading] = useState(false)
+
+  const openCritModal = async (tipo) => {
+    setCritModal(tipo)
+    setCritItems([])
+    setCritLoading(true)
+    try {
+      const data = tipo === 'almacen'
+        ? await getStockCriticoAlmacen()
+        : await getStockCriticoTienda()
+      setCritItems(data)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setCritLoading(false)
+    }
+  }
+
   // ── Solo KPIs y Gráficos ──
   const fetchKpiAndCharts = useCallback(async () => {
-    const hoyStart = new Date(); hoyStart.setHours(0,0,0,0)
-    const hoyEnd   = new Date(); hoyEnd.setHours(23,59,59,999)
-
     setKpiLoading(true)
     try {
-      const [ventasRes, opHoyRes, critAlmRes, critTiendaRes] = await Promise.all([
-        supabase.from('movimientos').select('total_final').eq('tipo_movimiento', 'VENTA').gte('created_at', hoyStart.toISOString()).lte('created_at', hoyEnd.toISOString()),
-        supabase.from('movimientos').select('id', { count: 'exact', head: true }).gte('created_at', hoyStart.toISOString()).lte('created_at', hoyEnd.toISOString()),
-        supabase.from('inventario_almacen').select('id_variante', { count: 'exact', head: true }).lt('stock_fisico', 10),
-        supabase.from('inventario_tienda').select('id_variante', { count: 'exact', head: true }).lt('stock_exhibicion', 5),
-      ])
-      const ventasHoy = (ventasRes.data ?? []).reduce((s, r) => s + (r.total_final || 0), 0)
-      setKpi({ ventasHoy, opHoy: opHoyRes.count ?? 0, critAlmacen: critAlmRes.count ?? 0, critTienda: critTiendaRes.count ?? 0 })
+      const kpiData = await getKpis()
+      setKpi(kpiData)
+    } catch (e) {
+      console.error('Error cargando KPIs:', e)
     } finally { setKpiLoading(false) }
 
     setChartsLoading(true)
     try {
-      const { data: ventasMov } = await supabase.from('movimientos').select('metodo_pago, total_final, cantidad, producto_variantes(productos(nombre))').eq('tipo_movimiento', 'VENTA')
-      const pagoMap = {}
-      ;(ventasMov ?? []).forEach(m => { const key = m.metodo_pago ?? 'Sin método'; pagoMap[key] = (pagoMap[key] || 0) + (m.total_final || 0) })
-      setPieData(Object.entries(pagoMap).map(([name, value]) => ({ name, value: parseFloat(value.toFixed(2)) })))
-
-      const prodMap = {}
-      ;(ventasMov ?? []).forEach(m => { const nombre = m.producto_variantes?.productos?.nombre ?? 'Desconocido'; prodMap[nombre] = (prodMap[nombre] || 0) + (m.cantidad || 0) })
-      const sorted = Object.entries(prodMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, vendidos]) => ({ name: name.length > 14 ? name.slice(0, 13) + '…' : name, vendidos }))
-      setBarData(sorted)
+      const { pieData, barData } = await getVentasParaGraficos()
+      setPieData(pieData)
+      setBarData(barData)
+    } catch (e) {
+      console.error('Error cargando gráficos:', e)
     } finally { setChartsLoading(false) }
   }, [])
 
   // ── Solo Movimientos con Filtro ──
-  const fetchMovimientos = useCallback(async (fecha) => {
+  const fetchMovimientos = useCallback(async (fecha, pg) => {
     setMovLoading(true)
     try {
-      const parts = fecha.split('-')
-      const start = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0)
-      const end = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999)
-
-      const { data } = await supabase
-        .from('movimientos')
-        .select('*, producto_variantes(sku, talla, color, productos(nombre))')
-        .gte('created_at', start.toISOString())
-        .lte('created_at', end.toISOString())
-        .order('created_at', { ascending: false })
-      setMovimientos(data ?? [])
+      const { data, count } = await getMovimientosPorFecha(fecha, pg)
+      setMovimientos(data)
+      setMovCount(count)
+    } catch (e) {
+      console.error('Error cargando movimientos:', e)
     } finally {
       setMovLoading(false)
     }
   }, [])
 
   useEffect(() => { fetchKpiAndCharts() }, [fetchKpiAndCharts])
-  useEffect(() => { fetchMovimientos(filtroFecha) }, [filtroFecha, fetchMovimientos])
+  useEffect(() => { fetchMovimientos(filtroFecha, page) }, [filtroFecha, page, fetchMovimientos])
 
   const handleRefresh = () => {
     fetchKpiAndCharts()
-    fetchMovimientos(filtroFecha)
+    fetchMovimientos(filtroFecha, page)
+  }
+
+  const handleFechaChange = (e) => {
+    setPage(1)
+    setFiltroFecha(e.target.value)
   }
 
   const fmt = (n) => `S/ ${(n || 0).toFixed(2)}`
@@ -184,20 +201,22 @@ export default function AdminDashboard() {
           <KpiCard
             title="Stock Crítico Almacén"
             value={kpi.critAlmacen}
-            sub="Productos con menos de 10 unidades"
+            sub={kpi.critAlmacen > 0 ? 'Clic para ver cuáles' : 'Productos con menos de 10 unidades'}
             icon={Warehouse}
             color="bg-amber-500/15 text-amber-400"
             alert={kpi.critAlmacen > 0}
             loading={kpiLoading}
+            onClick={kpi.critAlmacen > 0 ? () => openCritModal('almacen') : undefined}
           />
           <KpiCard
             title="Stock Crítico Tienda"
             value={kpi.critTienda}
-            sub="Productos con menos de 5 en exhibición"
+            sub={kpi.critTienda > 0 ? 'Clic para ver cuáles' : 'Productos con menos de 5 en exhibición'}
             icon={Store}
             color="bg-red-500/15 text-red-400"
             alert={kpi.critTienda > 0}
             loading={kpiLoading}
+            onClick={kpi.critTienda > 0 ? () => openCritModal('tienda') : undefined}
           />
         </div>
 
@@ -286,7 +305,7 @@ export default function AdminDashboard() {
               <input
                 type="date"
                 value={filtroFecha}
-                onChange={(e) => setFiltroFecha(e.target.value)}
+                onChange={handleFechaChange}
                 className="bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
               />
               <button 
@@ -307,7 +326,7 @@ export default function AdminDashboard() {
           ) : movimientos.length === 0 ? (
             <div className="text-center py-16 text-gray-600 text-sm">No hay movimientos registrados aún.</div>
           ) : (
-            <div className="overflow-x-auto max-h-[600px] overflow-y-auto print:max-h-none print:overflow-visible">
+            <div className="overflow-x-auto print:overflow-visible">
               <table className="w-full text-left print:table">
                 <thead className="sticky top-0 bg-gray-950/90 backdrop-blur-sm print:static print:bg-transparent">
                   <tr className="border-b border-gray-800 print:border-black">
@@ -347,7 +366,11 @@ export default function AdminDashboard() {
                           </div>
                         </td>
                         <td className="px-6 py-3.5 text-center text-gray-300 text-sm font-semibold print:td">{mov.cantidad}</td>
-                        <td className="px-6 py-3.5 text-center text-gray-500 text-xs font-mono print:td">{mov.id_usuario?.substring(0, 8) ?? '—'}</td>
+                        <td className="px-6 py-3.5 text-center text-gray-500 text-xs font-mono print:td" title={mov.usuario_email ?? mov.id_usuario}>
+                          {mov.usuario_email
+                            ? mov.usuario_email.split('@')[0]
+                            : mov.id_usuario?.substring(0, 8) ?? '—'}
+                        </td>
                         <td className="px-6 py-3.5 text-right print:td">
                           {mov.total_final
                             ? <span className="text-emerald-400 font-mono font-semibold text-sm print:text-black">{fmt(mov.total_final)}</span>
@@ -361,8 +384,108 @@ export default function AdminDashboard() {
               </table>
             </div>
           )}
+
+          {/* Paginación */}
+          {!movLoading && totalPages > 1 && (
+            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-800 print:hidden">
+              <p className="text-gray-500 text-sm">
+                Página {page} de {totalPages} · {movCount} movimientos
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage(p => p - 1)}
+                  disabled={page === 1}
+                  className="px-3 py-1.5 bg-gray-800 border border-gray-700 text-gray-400 hover:text-white rounded-lg text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Anterior
+                </button>
+                <button
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={page === totalPages}
+                  className="px-3 py-1.5 bg-gray-800 border border-gray-700 text-gray-400 hover:text-white rounded-lg text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* ── Modal Stock Crítico ── */}
+      {critModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+              <h2 className="text-white font-semibold flex items-center gap-2">
+                {critModal === 'almacen'
+                  ? <><Warehouse className="w-5 h-5 text-amber-400" /> Stock Crítico — Almacén</>
+                  : <><Store className="w-5 h-5 text-red-400" /> Stock Crítico — Tienda</>
+                }
+              </h2>
+              <button onClick={() => setCritModal(null)} className="text-gray-500 hover:text-white transition-colors">
+                <span className="text-xl leading-none">×</span>
+              </button>
+            </div>
+
+            <div className="p-4 max-h-[60vh] overflow-y-auto">
+              {critLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 text-indigo-400 animate-spin mr-2" />
+                  <span className="text-gray-400 text-sm">Cargando...</span>
+                </div>
+              ) : critItems.length === 0 ? (
+                <p className="text-center text-gray-500 py-10 text-sm">No hay items críticos.</p>
+              ) : (
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800">
+                      <th className="pb-3 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Producto</th>
+                      <th className="pb-3 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">
+                        {critModal === 'almacen' ? 'Stock' : 'Exhibición'}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800/50">
+                    {critItems.map((item, i) => {
+                      const stock = critModal === 'almacen' ? item.stock_fisico : item.stock_exhibicion
+                      const stockColor = stock === 0 ? 'text-red-400' : 'text-amber-400'
+                      return (
+                        <tr key={i} className="hover:bg-gray-800/30 transition-colors">
+                          <td className="py-3 px-2">
+                            <p className="text-white font-medium">{item.producto_variantes?.productos?.nombre}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-indigo-300 font-mono text-xs">{item.producto_variantes?.sku}</span>
+                              {(item.producto_variantes?.talla || item.producto_variantes?.color) && (
+                                <span className="text-gray-500 text-xs uppercase">
+                                  {item.producto_variantes.talla ? `T:${item.producto_variantes.talla}` : ''}
+                                  {item.producto_variantes.color ? ` C:${item.producto_variantes.color}` : ''}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-2 text-right">
+                            <span className={`font-bold text-base font-mono ${stockColor}`}>{stock}</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-800 text-right">
+              <button
+                onClick={() => setCritModal(null)}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-xl text-sm transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   )
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
-import { supabase } from '../lib/supabaseClient'
+import { getFinanzas, actualizarCostoYPrecio } from '../services/inventario.service'
 import { Calculator, Save, Loader2, AlertCircle, TrendingUp, TrendingDown } from 'lucide-react'
 
 export default function AdminFinanzas() {
@@ -14,45 +14,8 @@ export default function AdminFinanzas() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const { data: prods, error } = await supabase
-        .from('productos')
-        .select(`
-          id,
-          nombre,
-          producto_variantes(
-            id,
-            sku,
-            talla,
-            color,
-            inventario_almacen(costo_unitario),
-            inventario_tienda(precio_venta, descuento_porcentaje)
-          )
-        `)
-        .eq('activo', true)
-        .order('nombre')
-
-      if (error) throw error
-
-      const formatted = []
-      prods.forEach(p => {
-        (p.producto_variantes || []).forEach(v => {
-          const almacenInfo = Array.isArray(v.inventario_almacen) ? v.inventario_almacen[0] : v.inventario_almacen
-          const tiendaInfo = Array.isArray(v.inventario_tienda) ? v.inventario_tienda[0] : v.inventario_tienda
-
-          formatted.push({
-            id_variante: v.id,
-            nombre: p.nombre,
-            sku: v.sku,
-            talla: v.talla,
-            color: v.color,
-            costo_unitario: almacenInfo?.costo_unitario || 0,
-            precio_venta: tiendaInfo?.precio_venta || 0,
-            descuento_porcentaje: tiendaInfo?.descuento_porcentaje || 0,
-          })
-        })
-      })
-
-      setData(formatted)
+      const filas = await getFinanzas()
+      setData(filas)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -72,33 +35,8 @@ export default function AdminFinanzas() {
     setSavingRowId(item.id_variante)
     setError(null)
     setSuccess(null)
-
     try {
-      // Upsert almacen
-      const { data: existsAlmacen } = await supabase.from('inventario_almacen').select('id_variante').eq('id_variante', item.id_variante).limit(1)
-      if (existsAlmacen?.length > 0) {
-        await supabase.from('inventario_almacen').update({ costo_unitario: item.costo_unitario }).eq('id_variante', item.id_variante)
-      } else {
-        await supabase.from('inventario_almacen').insert({ id_variante: item.id_variante, costo_unitario: item.costo_unitario, stock_fisico: 0 })
-      }
-
-      // Upsert tienda
-      const { data: existsTienda } = await supabase.from('inventario_tienda').select('id_variante').eq('id_variante', item.id_variante).limit(1)
-      if (existsTienda?.length > 0) {
-        await supabase.from('inventario_tienda').update({
-          precio_venta: item.precio_venta,
-          descuento_porcentaje: item.descuento_porcentaje
-        }).eq('id_variante', item.id_variante)
-      } else {
-        await supabase.from('inventario_tienda').insert({
-          id_variante: item.id_variante,
-          precio_venta: item.precio_venta,
-          descuento_porcentaje: item.descuento_porcentaje,
-          stock_exhibicion: 0
-        })
-      }
-
-      // Feedback visual rápido
+      await actualizarCostoYPrecio(item)
       setSuccess(`¡Guardado correcto para ${item.nombre}!`)
       setTimeout(() => setSavingRowId(null), 500)
       setTimeout(() => setSuccess(null), 3500)

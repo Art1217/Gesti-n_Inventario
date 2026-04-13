@@ -1,15 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Html5Qrcode } from 'html5-qrcode'
+import { useState, useEffect, useCallback } from 'react'
 import Sidebar from '../components/Sidebar'
-import { supabase } from '../lib/supabaseClient'
+import { useScanner } from '../hooks/useScanner'
+import { useCarrito } from '../hooks/useCarrito'
 import { useAuth } from '../context/AuthContext'
+import { buscarVariantesPOS } from '../services/productos.service'
+import { procesarVenta } from '../services/inventario.service'
 import { ScanLine, Search, ShoppingCart, Plus, Minus, Trash2,
   X, Loader2, CheckCircle, CreditCard, Banknote,
   Smartphone, AlertCircle, Receipt, PackageX, LogOut
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-
-const IGV_RATE = 0.18
 
 const PAYMENT_METHODS = [
   { id: 'EFECTIVO', label: 'Efectivo', icon: Banknote, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20' },
@@ -31,15 +31,13 @@ export default function TiendaPOS() {
     navigate('/login', { replace: true })
   }
 
+  const { isScanning, startScanner, stopScanner } = useScanner({ elementId: 'pos-reader', qrboxSize: 220 })
+  const { carrito, agregar, cambiarCantidad, quitar, vaciar, subtotal, igv, total, totalItems } = useCarrito()
+
   // Catálogo y búsqueda
   const [query, setQuery] = useState('')
   const [productos, setProductos] = useState([])
   const [searching, setSearching] = useState(false)
-  const [isScanning, setIsScanning] = useState(false)
-  const scannerRef = useRef(null)
-
-  // Carrito
-  const [carrito, setCarrito] = useState([])
 
   // Modal de pago
   const [payModal, setPayModal] = useState(false)
@@ -54,60 +52,8 @@ export default function TiendaPOS() {
     if (!texto.trim()) { setProductos([]); return }
     setSearching(true)
     try {
-      // 1. Intentamos buscar por SKU primero (es lo más rápido en un POS)
-      let { data: resultados, error } = await supabase
-        .from('producto_variantes')
-        .select(`
-          id,
-          sku,
-          talla,
-          color,
-          productos!inner (nombre, categoria),
-          inventario_tienda!inner (stock_exhibicion, precio_final)
-        `)
-        .eq('productos.activo', true)
-        .ilike('sku', `%${texto}%`);
-
-      // 2. Si no hay resultados por SKU, buscamos por Nombre en la tabla relacionada
-      if (!error && (!resultados || resultados.length === 0)) {
-        const { data: resultadosNombre, error: errorNombre } = await supabase
-          .from('producto_variantes')
-          .select(`
-            id,
-            sku,
-            talla,
-            color,
-            productos!inner (nombre, categoria),
-            inventario_tienda!inner (stock_exhibicion, precio_final)
-          `)
-          .eq('productos.activo', true)
-          .ilike('productos.nombre', `%${texto}%`);
-          
-        resultados = resultadosNombre;
-        error = errorNombre;
-      }
-
-      if (error) {
-        console.error("Error exacto de Supabase:", error.message || error);
-        setSearching(false);
-        return;
-      }
-
-      // Aplanar la respuesta de inventario_tienda para facilitar el renderizado del POS
-      const formatted = (resultados ?? []).map(v => {
-        const tienda = Array.isArray(v.inventario_tienda) ? v.inventario_tienda[0] : v.inventario_tienda
-        return {
-          id_variante: v.id,
-          sku: v.sku,
-          talla: v.talla,
-          color: v.color,
-          productos: v.productos,
-          stock_exhibicion: tienda?.stock_exhibicion || 0,
-          precio_final: tienda?.precio_final || 0
-        }
-      })
-      
-      setProductos(formatted)
+      const resultados = await buscarVariantesPOS(texto)
+      setProductos(resultados)
     } catch (e) {
       console.error('Error buscando productos POS:', e)
     } finally {
@@ -120,91 +66,11 @@ export default function TiendaPOS() {
     return () => clearTimeout(t)
   }, [query, buscarProductos])
 
-  // Limpieza del escáner al desmontar
-  useEffect(() => {
-    return () => {
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {})
-      }
-    }
-  }, [])
-
-  // --- Escáner ---
+  // --- Escáner: callback post-scan ---
   const handleScanned = useCallback(async (sku) => {
-    // Detener escáner antes de buscar
-    if (scannerRef.current) {
-      try { await scannerRef.current.stop() } catch (_) {}
-      try { scannerRef.current.clear() } catch (_) {}
-      scannerRef.current = null
-    }
-    setIsScanning(false)
     setQuery(sku)
     await buscarProductos(sku)
   }, [buscarProductos])
-
-  const startScanner = async () => {
-    setIsScanning(true)
-    await new Promise(r => setTimeout(r, 150))
-    try {
-      const qrcode = new Html5Qrcode('pos-reader')
-      scannerRef.current = qrcode
-      // Intentar cámara trasera estricta, fallback a cualquier cámara si falla (ej: desktop)
-      const camConfig = { facingMode: { exact: 'environment' } }
-      try {
-        await qrcode.start(camConfig, { fps: 12, qrbox: { width: 220, height: 220 } }, (decoded) => handleScanned(decoded), () => {})
-      } catch (_) {
-        await qrcode.start('environment', { fps: 12, qrbox: { width: 220, height: 220 } }, (decoded) => handleScanned(decoded), () => {})
-      }
-    } catch (err) {
-      console.error('Error iniciando escáner POS:', err)
-      setIsScanning(false)
-    }
-  }
-
-  const stopScanner = async () => {
-    if (scannerRef.current) {
-      try { await scannerRef.current.stop() } catch (_) {}
-      try { scannerRef.current.clear() } catch (_) {}
-      scannerRef.current = null
-    }
-    setIsScanning(false)
-  }
-
-  // --- Carrito ---
-  const agregarAlCarrito = (item) => {
-    const pf = getPrecioFinal(item)
-    setCarrito(prev => {
-      const existe = prev.find(c => c.id_variante === item.id_variante)
-      if (existe) {
-        if (existe.cantidad >= item.stock_exhibicion) return prev
-        return prev.map(c => c.id_variante === item.id_variante ? { ...c, cantidad: c.cantidad + 1 } : c)
-      }
-      if (item.stock_exhibicion <= 0) return prev
-      return [...prev, {
-        id_variante: item.id_variante,
-        nombre: item.productos?.nombre,
-        sku: item.sku,
-        talla: item.talla,
-        color: item.color,
-        precio_final: pf,
-        stock_max: item.stock_exhibicion,
-        cantidad: 1,
-      }]
-    })
-  }
-
-  const cambiarCantidad = (id, delta) => {
-    setCarrito(prev => prev
-      .map(c => c.id_variante === id ? { ...c, cantidad: Math.min(c.stock_max, Math.max(1, c.cantidad + delta)) } : c)
-    )
-  }
-
-  const quitarDelCarrito = (id) => setCarrito(prev => prev.filter(c => c.id_variante !== id))
-
-  // --- Totales ---
-  const subtotal = parseFloat(carrito.reduce((s, c) => s + c.precio_final * c.cantidad, 0).toFixed(2))
-  const igv = parseFloat((subtotal * IGV_RATE).toFixed(2))
-  const total = parseFloat((subtotal + igv).toFixed(2))
 
   // --- Cobrar ---
   const handleCobrar = async () => {
@@ -212,28 +78,20 @@ export default function TiendaPOS() {
     setProcessing(true)
     setError(null)
     try {
-      // Una sola llamada RPC que valida stock actual, descuenta e inserta
-      // movimientos en una transacción atómica (si falla algo, revierte todo)
+      const IGV = 0.18
       const items = carrito.map(item => ({
         id_variante: item.id_variante,
         cantidad: item.cantidad,
-        subtotal: parseFloat((item.precio_final * item.cantidad).toFixed(2)),
-        igv: parseFloat((item.precio_final * item.cantidad * IGV_RATE).toFixed(2)),
-        total_final: parseFloat((item.precio_final * item.cantidad * (1 + IGV_RATE)).toFixed(2)),
+        subtotal:    parseFloat((item.precio_final * item.cantidad).toFixed(2)),
+        igv:         parseFloat((item.precio_final * item.cantidad * IGV).toFixed(2)),
+        total_final: parseFloat((item.precio_final * item.cantidad * (1 + IGV)).toFixed(2)),
       }))
 
-      const { data, error } = await supabase.rpc('procesar_venta', {
-        p_items: items,
-        p_id_usuario: user.id,
-        p_metodo_pago: metodoPago,
-      })
-
-      if (error) throw new Error(error.message)
-      if (!data?.ok) throw new Error(data?.error ?? 'Error al procesar la venta')
+      await procesarVenta(items, user.id, metodoPago)
 
       setFinalTotal(total)
       setVentaOk(true)
-      setCarrito([])
+      vaciar()
       setQuery('')
       setProductos([])
     } catch (e) {
@@ -252,7 +110,6 @@ export default function TiendaPOS() {
 
   // Tab activo en móvil: 'buscar' | 'carrito'
   const [mobileTab, setMobileTab] = useState('buscar')
-  const totalItems = carrito.reduce((s, c) => s + c.cantidad, 0)
 
   return (
     <div className="flex min-h-screen bg-gray-950">
@@ -350,7 +207,7 @@ export default function TiendaPOS() {
                         )}
                       </div>
                     </div>
-                    <button onClick={() => quitarDelCarrito(item.id_variante)} className="text-gray-600 hover:text-red-400 transition-colors flex-shrink-0 mt-0.5">
+                    <button onClick={() => quitar(item.id_variante)} className="text-gray-600 hover:text-red-400 transition-colors flex-shrink-0 mt-0.5">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -409,14 +266,14 @@ export default function TiendaPOS() {
               {/* Escáner */}
               {!isScanning ? (
                 <button
-                  onClick={startScanner}
+                  onClick={() => startScanner(handleScanned)}
                   className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-amber-950 font-semibold rounded-xl text-sm transition-all shadow-lg shadow-amber-500/20 flex-shrink-0"
                 >
                   <ScanLine className="w-4 h-4" />
                   Escanear
                 </button>
               ) : (
-                <button onClick={stopScanner} className="flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white font-semibold rounded-xl text-sm flex-shrink-0">
+                <button onClick={() => stopScanner()} className="flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white font-semibold rounded-xl text-sm flex-shrink-0">
                   <X className="w-4 h-4" />
                   Cancelar
                 </button>
@@ -499,7 +356,7 @@ export default function TiendaPOS() {
                           {sinStock ? 'Sin stock' : `Stock: ${item.stock_exhibicion}`}
                         </p>
                         <button
-                          onClick={() => agregarAlCarrito(item)}
+                          onClick={() => agregar(item)}
                           disabled={sinStock || maxAlcanzado}
                           className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-xl transition-all"
                         >

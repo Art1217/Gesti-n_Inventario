@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
-import { supabase } from '../lib/supabaseClient'
+import { getProveedores, crearProveedor, actualizarProveedor, eliminarProveedor } from '../services/proveedores.service'
 import { Plus, Pencil, Trash2, X, Loader2, Truck, AlertCircle } from 'lucide-react'
 
 const EMPTY_FORM = { nombre: '', contacto: '', telefono: '' }
@@ -47,12 +47,8 @@ export default function Proveedores() {
     setLoading(true)
     setError(null)
     try {
-      const { data, error } = await supabase
-        .from('proveedores')
-        .select('*')
-        .order('nombre')
-      if (error) throw error
-      setProveedores(data ?? [])
+      const data = await getProveedores()
+      setProveedores(data)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -71,15 +67,11 @@ export default function Proveedores() {
     setSaving(true)
     setError(null)
     try {
-      let qError
       if (editingId) {
-        const { error } = await supabase.from('proveedores').update(form).eq('id', editingId)
-        qError = error
+        await actualizarProveedor(editingId, form)
       } else {
-        const { error } = await supabase.from('proveedores').insert(form)
-        qError = error
+        await crearProveedor(form)
       }
-      if (qError) throw qError
       closeModal()
       fetchProveedores()
     } catch (err) {
@@ -93,8 +85,7 @@ export default function Proveedores() {
     if (!window.confirm('¿Eliminar este proveedor? Esta acción no se puede deshacer.')) return
     setError(null)
     try {
-      const { error } = await supabase.from('proveedores').delete().eq('id', id)
-      if (error) throw error
+      await eliminarProveedor(id)
       fetchProveedores()
     } catch (err) {
       setError(err.message)

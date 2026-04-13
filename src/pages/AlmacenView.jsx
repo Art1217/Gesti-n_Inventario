@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Html5Qrcode } from 'html5-qrcode'
+import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
-import { supabase } from '../lib/supabaseClient'
+import { useScanner } from '../hooks/useScanner'
 import { useAuth } from '../context/AuthContext'
+import { buscarVariantePorSKU } from '../services/productos.service'
+import { getStockAlmacen, procesarEntradaAlmacen } from '../services/inventario.service'
 import { ScanLine, Search, PackagePlus, AlertCircle, CheckCircle, X, Loader2, Database } from 'lucide-react'
 
 function Modal({ title, onClose, children }) {
@@ -24,8 +25,9 @@ function Modal({ title, onClose, children }) {
 export default function AlmacenView() {
   const { user } = useAuth()
   
+  const { isScanning, startScanner, stopScanner } = useScanner({ elementId: 'reader', qrboxSize: 240 })
+
   const [manualSku, setManualSku] = useState('')
-  const [isScanning, setIsScanning] = useState(false)
   const [scannedProduct, setScannedProduct] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState({ cantidad: '' })
@@ -34,17 +36,12 @@ export default function AlmacenView() {
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
-  const scannerRef = useRef(null)
 
   const fetchStock = useCallback(async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('inventario_almacen')
-        .select('*, producto_variantes!inner(*, productos!inner(*))')
-        .eq('producto_variantes.productos.activo', true)
-      if (error) throw error
-      setStock(data ?? [])
+      const data = await getStockAlmacen()
+      setStock(data)
     } catch(err) {
       console.error(err)
     } finally {
@@ -54,32 +51,11 @@ export default function AlmacenView() {
 
   useEffect(() => { fetchStock() }, [fetchStock])
 
-  useEffect(() => {
-    return () => {
-      if (scannerRef.current) {
-         scannerRef.current.clear().catch(console.error);
-      }
-    }
-  }, [])
-
   const handleProductFound = async (sku) => {
-    if (isScanning && scannerRef.current) {
-      scannerRef.current.clear().catch(console.error)
-      setIsScanning(false)
-    }
     setProcessing(true)
     setError(null)
     try {
-      const { data, error } = await supabase
-        .from('producto_variantes')
-        .select('*, productos!inner(nombre, activo)')
-        .eq('sku', sku)
-        .eq('productos.activo', true)
-        .limit(1)
-
-      if (error) throw error
-      
-      const variante = data?.[0]
+      const variante = await buscarVariantePorSKU(sku)
       if (!variante) {
         setError(`Producto no encontrado en el catálogo (SKU: ${sku})`)
         setScannedProduct(null)
@@ -102,33 +78,13 @@ export default function AlmacenView() {
     setForm({ cantidad: '' })
   }
 
-  const startScanner = async () => {
-    setIsScanning(true)
+  const handleStartScanner = async () => {
     setError(null)
-    await new Promise(r => setTimeout(r, 150))
     try {
-      const qrcode = new Html5Qrcode('reader')
-      scannerRef.current = qrcode
-      const camConfig = { facingMode: { exact: 'environment' } }
-      try {
-        await qrcode.start(camConfig, { fps: 12, qrbox: { width: 240, height: 240 } }, (decodedText) => handleProductFound(decodedText), () => {})
-      } catch (_) {
-        await qrcode.start('environment', { fps: 12, qrbox: { width: 240, height: 240 } }, (decodedText) => handleProductFound(decodedText), () => {})
-      }
-    } catch (err) {
-      console.error('Error iniciando escáner:', err)
-      setIsScanning(false)
+      await startScanner(handleProductFound)
+    } catch (_) {
       setError('No se pudo acceder a la cámara. Verifica los permisos o usa HTTPS.')
     }
-  }
-
-  const stopScanner = async () => {
-    if (scannerRef.current) {
-      try { await scannerRef.current.stop() } catch (_) {}
-      try { scannerRef.current.clear() } catch (_) {}
-      scannerRef.current = null
-    }
-    setIsScanning(false)
   }
 
   const handleManualSearch = (e) => {
@@ -146,16 +102,7 @@ export default function AlmacenView() {
       const amountToAdd = parseInt(form.cantidad)
       if (amountToAdd <= 0) throw new Error("Cantidad inválida")
 
-      // RPC atómica: upsert en almacén e inserta movimiento ENTRADA
-      // en una sola transacción (si falla, revierte todo)
-      const { data, error } = await supabase.rpc('procesar_entrada_almacen', {
-        p_id_variante: scannedProduct.id,
-        p_cantidad: amountToAdd,
-        p_id_usuario: user.id,
-      })
-
-      if (error) throw new Error(error.message)
-      if (!data?.ok) throw new Error(data?.error ?? 'Error al registrar el ingreso')
+      await procesarEntradaAlmacen(scannedProduct.id, amountToAdd, user.id)
 
       setSuccess(`¡Se agregaron ${amountToAdd} unidades correctamente!`)
       setTimeout(() => setSuccess(null), 4000)
@@ -204,7 +151,7 @@ export default function AlmacenView() {
 
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-8 text-center flex flex-col items-center">
           {!isScanning ? (
-            <button onClick={startScanner} className="w-full max-w-sm flex flex-col items-center justify-center p-8 bg-amber-500 hover:bg-amber-400 text-amber-950 rounded-2xl transition-all shadow-lg shadow-amber-500/20 group">
+            <button onClick={handleStartScanner} className="w-full max-w-sm flex flex-col items-center justify-center p-8 bg-amber-500 hover:bg-amber-400 text-amber-950 rounded-2xl transition-all shadow-lg shadow-amber-500/20 group">
               <ScanLine className="w-16 h-16 mb-4 group-hover:scale-110 transition-transform" />
               <span className="text-2xl font-bold font-sans">Escanear Ingreso</span>
               <span className="text-sm font-medium mt-1 opacity-80">Abre la cámara del dispositivo</span>
@@ -212,7 +159,7 @@ export default function AlmacenView() {
           ) : (
             <div className="w-full max-w-sm">
                <div id="reader" className="w-full rounded-2xl overflow-hidden shadow-xl bg-black border-2 border-amber-500/50"></div>
-               <button onClick={stopScanner} className="mt-4 px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl font-medium w-full text-sm">Cancelar Escaneo</button>
+               <button onClick={() => stopScanner()} className="mt-4 px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl font-medium w-full text-sm">Cancelar Escaneo</button>
             </div>
           )}
 

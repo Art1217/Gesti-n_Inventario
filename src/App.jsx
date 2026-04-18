@@ -9,6 +9,7 @@ import Transferencias from './pages/Transferencias'
 import TiendaPOS from './pages/TiendaPOS'
 import Proveedores from './pages/Proveedores'
 import Catalogo from './pages/Catalogo'
+import Cotizador from './pages/Cotizador'
 
 function RoleRedirect() {
   const { userRole, isLoading } = useAuth()
@@ -31,6 +32,9 @@ export default function App() {
       } />
       <Route path="/admin/finanzas" element={
         <ProtectedRoute allowedRoles={['ADMIN']}><AdminFinanzas /></ProtectedRoute>
+      } />
+      <Route path="/admin/cotizaciones" element={
+        <ProtectedRoute allowedRoles={['ADMIN']}><Cotizador /></ProtectedRoute>
       } />
 
       {/* ADMIN + ALMACENERO */}

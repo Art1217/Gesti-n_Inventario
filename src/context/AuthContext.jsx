@@ -1,4 +1,4 @@
-﻿import { createContext, useContext, useEffect, useState } from 'react'
+﻿import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 const AuthContext = createContext(null)
@@ -7,8 +7,13 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined)
   const [userRole, setUserRole] = useState(null)
   const [loadingRole, setLoadingRole] = useState(false)
+  // Guarda el userId para el que ya cargamos el rol — evita re-fetch en cada foco de ventana
+  const roleLoadedForRef = useRef(null)
 
   const fetchUserRole = async (userId) => {
+    // Si ya tenemos el rol para este usuario, no volver a buscar (evita spinner al cambiar ventana)
+    if (roleLoadedForRef.current === userId) return
+
     setLoadingRole(true)
     try {
       const { data, error } = await supabase
@@ -20,6 +25,7 @@ export function AuthProvider({ children }) {
       if (error) throw error
       const nombre = data?.[0]?.roles?.nombre ?? null
       setUserRole(nombre)
+      roleLoadedForRef.current = userId
     } catch (err) {
       console.error('Error al obtener rol:', err.message)
       setUserRole(null)
@@ -37,12 +43,16 @@ export function AuthProvider({ children }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       // INITIAL_SESSION ya fue manejado por getSession() arriba — evita doble query
       if (event === 'INITIAL_SESSION') return
+
       setSession(session)
-      if (session?.user) {
-        fetchUserRole(session.user.id)
-      } else {
+
+      if (event === 'SIGNED_IN') {
+        if (session?.user) fetchUserRole(session.user.id)
+      } else if (event === 'SIGNED_OUT') {
         setUserRole(null)
+        roleLoadedForRef.current = null
       }
+      // TOKEN_REFRESHED, USER_UPDATED: solo actualiza la sesión, sin tocar el rol
     })
 
     return () => subscription.unsubscribe()

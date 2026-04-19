@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
-import { getKpis, getVentasParaGraficos, getMovimientosPorFecha, MOVIMIENTOS_PAGE_SIZE } from '../services/movimientos.service'
+import { getKpis, getVentasParaGraficos, getMovimientosPorFecha, getKpisCotOC, MOVIMIENTOS_PAGE_SIZE } from '../services/movimientos.service'
 import { getStockCriticoAlmacen, getStockCriticoTienda } from '../services/inventario.service'
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
@@ -9,7 +9,7 @@ import {
 import {
   TrendingUp, AlertTriangle, ShoppingBag, Warehouse,
   Store, Loader2, RefreshCw, Clock, ArrowRightLeft,
-  PackagePlus, ShoppingCart, Printer
+  PackagePlus, ShoppingCart, Printer, FileText, ClipboardList, Calendar
 } from 'lucide-react'
 
 // ─── Colores ───────────────────────────────────────────────
@@ -53,6 +53,9 @@ export default function AdminDashboard() {
   const [kpi, setKpi] = useState({ ventasHoy: 0, opHoy: 0, critAlmacen: 0, critTienda: 0 })
   const [kpiLoading, setKpiLoading] = useState(true)
 
+  const [cotOcKpi, setCotOcKpi] = useState({ cotMes: 0, montoMes: 0, ocActivas: 0, ocVencen: 0, proximas: [] })
+  const [cotOcLoading, setCotOcLoading] = useState(true)
+
   const [pieData, setPieData] = useState([])
   const [barData, setBarData] = useState([])
   const [chartsLoading, setChartsLoading] = useState(true)
@@ -67,6 +70,7 @@ export default function AdminDashboard() {
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
     return d.toISOString().slice(0, 10)
   })
+  const [filtroTipo, setFiltroTipo] = useState('')
 
   const totalPages = Math.max(1, Math.ceil(movCount / MOVIMIENTOS_PAGE_SIZE))
 
@@ -109,13 +113,21 @@ export default function AdminDashboard() {
     } catch (e) {
       console.error('Error cargando gráficos:', e)
     } finally { setChartsLoading(false) }
+
+    setCotOcLoading(true)
+    try {
+      const cotOcData = await getKpisCotOC()
+      setCotOcKpi(cotOcData)
+    } catch (e) {
+      console.error('Error cargando KPIs estratégicos:', e)
+    } finally { setCotOcLoading(false) }
   }, [])
 
   // ── Solo Movimientos con Filtro ──
-  const fetchMovimientos = useCallback(async (fecha, pg) => {
+  const fetchMovimientos = useCallback(async (fecha, pg, tipo) => {
     setMovLoading(true)
     try {
-      const { data, count } = await getMovimientosPorFecha(fecha, pg)
+      const { data, count } = await getMovimientosPorFecha(fecha, pg, tipo)
       setMovimientos(data)
       setMovCount(count)
     } catch (e) {
@@ -126,16 +138,33 @@ export default function AdminDashboard() {
   }, [])
 
   useEffect(() => { fetchKpiAndCharts() }, [fetchKpiAndCharts])
-  useEffect(() => { fetchMovimientos(filtroFecha, page) }, [filtroFecha, page, fetchMovimientos])
+  useEffect(() => { fetchMovimientos(filtroFecha, page, filtroTipo) }, [filtroFecha, page, filtroTipo, fetchMovimientos])
 
   const handleRefresh = () => {
     fetchKpiAndCharts()
-    fetchMovimientos(filtroFecha, page)
+    fetchMovimientos(filtroFecha, page, filtroTipo)
   }
 
   const handleFechaChange = (e) => {
     setPage(1)
     setFiltroFecha(e.target.value)
+  }
+
+  const handleTipoChange = (e) => {
+    setPage(1)
+    setFiltroTipo(e.target.value)
+  }
+
+  const plazoInfo = (orden) => {
+    if (!orden.fecha_entrega) return null
+    const hoy = new Date(); hoy.setHours(0,0,0,0)
+    const entrega = new Date(orden.fecha_entrega + 'T00:00:00')
+    const dias = Math.round((entrega - hoy) / 86400000)
+    if (dias < 0)  return { label: `Vencida (${Math.abs(dias)}d)`, cls: 'bg-red-500/15 text-red-400 border-red-500/30' }
+    if (dias === 0) return { label: 'Vence hoy',                   cls: 'bg-red-500/15 text-red-400 border-red-500/30' }
+    if (dias <= 3)  return { label: `${dias}d restantes`,          cls: 'bg-red-500/15 text-red-400 border-red-500/30' }
+    if (dias <= 7)  return { label: `${dias}d restantes`,          cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' }
+    return              { label: `${dias}d restantes`,             cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' }
   }
 
   const fmt = (n) => `S/ ${(n || 0).toFixed(2)}`
@@ -219,6 +248,106 @@ export default function AdminDashboard() {
             onClick={kpi.critTienda > 0 ? () => openCritModal('tienda') : undefined}
           />
         </div>
+
+        {/* ── KPIs Estratégicos ── */}
+        <div className="print:hidden">
+          <h2 className="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-3 flex items-center gap-2">
+            <ClipboardList className="w-4 h-4" /> Cotizaciones y Órdenes de Compra — Este mes
+          </h2>
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+            <KpiCard
+              title="Cotizaciones Emitidas"
+              value={cotOcKpi.cotMes}
+              sub="Cotizaciones generadas este mes"
+              icon={FileText}
+              color="bg-indigo-500/15 text-indigo-400"
+              loading={cotOcLoading}
+            />
+            <KpiCard
+              title="Monto Cotizado (S/)"
+              value={fmt(cotOcKpi.montoMes)}
+              sub="Total cotizado en el mes"
+              icon={TrendingUp}
+              color="bg-emerald-500/15 text-emerald-400"
+              loading={cotOcLoading}
+            />
+            <KpiCard
+              title="OC Activas"
+              value={cotOcKpi.ocActivas}
+              sub="Órdenes Pendiente o En Proceso"
+              icon={ClipboardList}
+              color="bg-amber-500/15 text-amber-400"
+              loading={cotOcLoading}
+            />
+            <KpiCard
+              title="OC Por Vencer ≤7 días"
+              value={cotOcKpi.ocVencen}
+              sub="Órdenes activas con plazo próximo"
+              icon={AlertTriangle}
+              color="bg-red-500/15 text-red-400"
+              alert={cotOcKpi.ocVencen > 0}
+              loading={cotOcLoading}
+            />
+          </div>
+        </div>
+
+        {/* ── Próximos Vencimientos OC ── */}
+        {!cotOcLoading && cotOcKpi.proximas.length > 0 && (
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden print:hidden">
+            <div className="px-6 py-4 border-b border-gray-800 flex items-center gap-3">
+              <Calendar className="w-5 h-5 text-gray-500" />
+              <h2 className="text-white font-semibold">Próximos Vencimientos de OC</h2>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800">
+                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">N°</th>
+                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tipo</th>
+                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Cliente / Descripción</th>
+                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Entrega</th>
+                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Plazo</th>
+                    <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/50">
+                  {cotOcKpi.proximas.map(oc => {
+                    const plazo = plazoInfo(oc)
+                    const cliente = oc.cotizaciones?.cliente_razon_social || oc.cliente_nombre || '—'
+                    return (
+                      <tr key={oc.id} className="hover:bg-gray-800/30 transition-colors">
+                        <td className="px-5 py-3.5 text-indigo-400 font-mono text-xs">
+                          OC-{String(oc.id).padStart(4, '0')}
+                          {oc.id_cotizacion && <span className="text-gray-600 ml-1">· COT-{String(oc.id_cotizacion).padStart(4, '0')}</span>}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${oc.tipo === 'Externa' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                            {oc.tipo}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5 text-white max-w-[200px] truncate">{cliente}</td>
+                        <td className="px-5 py-3.5 text-gray-400 text-xs font-mono whitespace-nowrap">
+                          {oc.fecha_entrega ? new Date(oc.fecha_entrega + 'T00:00:00').toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          {plazo
+                            ? <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${plazo.cls}`}>{plazo.label}</span>
+                            : <span className="text-gray-600 text-xs">—</span>
+                          }
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span className={`text-xs px-2 py-0.5 rounded-full border ${oc.estado === 'Pendiente' ? 'bg-gray-700/50 text-gray-300 border-gray-600' : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/20'}`}>
+                            {oc.estado}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* ── Gráficos ── */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 print:hidden">
@@ -308,6 +437,17 @@ export default function AdminDashboard() {
                 onChange={handleFechaChange}
                 className="bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
               />
+              <select
+                value={filtroTipo}
+                onChange={handleTipoChange}
+                className="bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">Todos los tipos</option>
+                <option value="VENTA">Ventas</option>
+                <option value="ENTRADA">Entradas</option>
+                <option value="TRANSFERENCIA">Transferencias</option>
+                <option value="AJUSTE">Ajustes</option>
+              </select>
               <button 
                 onClick={() => window.print()}
                 className="flex items-center gap-2 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors border border-indigo-500"

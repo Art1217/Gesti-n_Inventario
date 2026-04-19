@@ -6,7 +6,7 @@ import {
   subirArchivoOC, getUrlArchivoOC,
 } from '../services/ordenes.service'
 import {
-  ClipboardList, Plus, Loader2, AlertCircle, X, Upload,
+  ClipboardList, Plus, Loader2, AlertCircle, X, Upload, Search,
   CheckCircle2, Clock, AlertTriangle, ChevronLeft, ChevronRight,
   ExternalLink, PackageCheck, FileText,
 } from 'lucide-react'
@@ -59,6 +59,7 @@ export default function OrdenesCompra() {
   const [page, setPage]                 = useState(1)
   const [totalPages, setTotalPages]     = useState(1)
   const [stats, setStats]               = useState({ activas: 0, vencidas: 0, entregadas: 0, total: 0 })
+  const [search, setSearch]             = useState('')
 
   const [error, setError]               = useState(null)
   const [success, setSuccess]           = useState(null)
@@ -68,11 +69,11 @@ export default function OrdenesCompra() {
   const [modalDetalle, setModalDetalle] = useState(null)
 
   // ── Carga de datos ──
-  const cargar = useCallback(async (f, p) => {
+  const cargar = useCallback(async (f, p, s) => {
     setLoading(true)
     try {
       const [res, st] = await Promise.all([
-        getOrdenes({ filtro: f, page: p }),
+        getOrdenes({ filtro: f, page: p, search: s }),
         getOrdenStats(),
       ])
       setOrdenes(res.data)
@@ -85,11 +86,12 @@ export default function OrdenesCompra() {
     }
   }, [])
 
-  useEffect(() => { cargar(filtro, page) }, [filtro, page, cargar])
+  useEffect(() => { cargar(filtro, page, search) }, [filtro, page, search, cargar])
 
   const handleFiltro = (f) => { setFiltro(f); setPage(1) }
+  const handleSearch = (v) => { setSearch(v); setPage(1) }
 
-  const refresh = () => cargar(filtro, page)
+  const refresh = () => cargar(filtro, page, search)
 
   // ── Avanzar estado desde la tabla ──
   const handleAvanzarEstado = async (orden) => {
@@ -169,7 +171,8 @@ export default function OrdenesCompra() {
           ))}
         </div>
 
-        {/* Filtros */}
+        {/* Filtros + búsqueda */}
+        <div className="flex flex-col sm:flex-row gap-3">
         <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
           {FILTROS.map(f => (
             <button
@@ -189,6 +192,17 @@ export default function OrdenesCompra() {
               )}
             </button>
           ))}
+        </div>
+        <div className="relative sm:ml-auto">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => handleSearch(e.target.value)}
+            placeholder="Buscar por cliente..."
+            className="w-full sm:w-64 pl-8 pr-3 py-2 bg-gray-900 border border-gray-800 rounded-xl text-white placeholder-gray-500 text-sm focus:outline-none focus:border-indigo-500"
+          />
+        </div>
         </div>
 
         {/* Tabla */}

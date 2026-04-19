@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient'
 const PAGE_SIZE = 20
 const BUCKET    = 'ordenes-compra'
 
-export async function getOrdenes({ filtro = 'todas', page = 1 } = {}) {
+export async function getOrdenes({ filtro = 'todas', page = 1, search = '' } = {}) {
   const from = (page - 1) * PAGE_SIZE
   const to   = from + PAGE_SIZE - 1
   const hoy  = new Date().toISOString().split('T')[0]
@@ -20,6 +20,10 @@ export async function getOrdenes({ filtro = 'todas', page = 1 } = {}) {
     q = q.lt('fecha_entrega', hoy).in('estado', ['Pendiente', 'En Proceso'])
   } else if (filtro === 'entregadas') {
     q = q.eq('estado', 'Entregada')
+  }
+
+  if (search.trim()) {
+    q = q.ilike('cliente_nombre', `%${search.trim()}%`)
   }
 
   const { data, error, count } = await q

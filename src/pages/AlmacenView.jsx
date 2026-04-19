@@ -32,6 +32,7 @@ export default function AlmacenView() {
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState({ cantidad: '' })
   const [stock, setStock] = useState([])
+  const [stockSearch, setStockSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState(null)
@@ -181,11 +182,23 @@ export default function AlmacenView() {
         </div>
 
         <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden mt-10">
-           <div className="px-6 py-5 border-b border-gray-800 flex items-center justify-between">
-             <h2 className="text-white font-semibold flex items-center gap-2">
+           <div className="px-6 py-5 border-b border-gray-800 flex flex-col sm:flex-row sm:items-center gap-3">
+             <h2 className="text-white font-semibold flex items-center gap-2 flex-shrink-0">
                <Database className="w-5 h-5 text-gray-400" />
                Stock Actual Almacén
              </h2>
+             {!loading && stock.length > 0 && (
+               <div className="relative sm:ml-auto">
+                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+                 <input
+                   type="text"
+                   value={stockSearch}
+                   onChange={e => setStockSearch(e.target.value)}
+                   placeholder="Filtrar por nombre o SKU..."
+                   className="w-full sm:w-64 pl-8 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 text-xs focus:outline-none focus:border-amber-500"
+                 />
+               </div>
+             )}
            </div>
            
            {loading ? (
@@ -209,7 +222,14 @@ export default function AlmacenView() {
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-gray-800/60">
-                   {stock.map((item) => (
+                   {stock
+                     .filter(item => {
+                       const q = stockSearch.toLowerCase()
+                       return !q
+                         || item.producto_variantes?.productos?.nombre?.toLowerCase().includes(q)
+                         || item.producto_variantes?.sku?.toLowerCase().includes(q)
+                     })
+                     .map((item) => (
                      <tr key={item.id_variante} className="hover:bg-gray-800/30 transition-colors">
                        <td className="px-6 py-4">
                          <div className="text-white font-medium text-sm">{item.producto_variantes?.productos?.nombre}</div>

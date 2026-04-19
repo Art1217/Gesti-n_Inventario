@@ -5,7 +5,7 @@ import { getVariantesActivas } from '../services/productos.service'
 import { getStockAlmacen, procesarTransferencia, procesarIngresoDirectoTienda } from '../services/inventario.service'
 import {
   ArrowRightLeft, PackagePlus, X, Loader2, AlertCircle,
-  CheckCircle, Warehouse, Store, Zap
+  CheckCircle, Warehouse, Store, Zap, Search
 } from 'lucide-react'
 
 function Modal({ title, icon: Icon, iconColor = 'text-indigo-400', onClose, children }) {
@@ -32,6 +32,7 @@ export default function Transferencias() {
   const isAdmin = userRole === 'ADMIN'
 
   const [stockAlmacen, setStockAlmacen] = useState([])
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [success, setSuccess] = useState(null)
   const [error, setError]     = useState(null)
@@ -184,6 +185,20 @@ export default function Transferencias() {
           </div>
         </div>
 
+        {/* Búsqueda */}
+        {!loading && stockAlmacen.length > 0 && (
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar por nombre o SKU..."
+              className="w-full sm:w-80 pl-10 pr-3 py-2.5 bg-gray-900 border border-gray-800 rounded-xl text-white placeholder-gray-500 text-sm focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+        )}
+
         {/* Tabla de stock de almacén */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
           {loading ? (
@@ -208,7 +223,14 @@ export default function Transferencias() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/50">
-                  {stockAlmacen.map(item => {
+                  {stockAlmacen
+                    .filter(item => {
+                      const q = search.toLowerCase()
+                      return !q
+                        || item.producto_variantes?.productos?.nombre?.toLowerCase().includes(q)
+                        || item.producto_variantes?.sku?.toLowerCase().includes(q)
+                    })
+                    .map(item => {
                     const variante = item.producto_variantes
                     return (
                     <tr key={item.id_variante} className="hover:bg-gray-800/30 transition-colors group">

@@ -104,6 +104,18 @@ export async function getStockCriticoAlmacen() {
   return data ?? []
 }
 
+export async function getStockTienda() {
+  const { data, error } = await supabase
+    .from('inventario_tienda')
+    .select('stock_exhibicion, precio_venta, producto_variantes(sku, talla, color, productos(nombre))')
+  if (error) throw error
+  return (data ?? []).sort((a, b) => {
+    const na = a.producto_variantes?.productos?.nombre ?? ''
+    const nb = b.producto_variantes?.productos?.nombre ?? ''
+    return na.localeCompare(nb)
+  })
+}
+
 export async function getStockCriticoTienda() {
   const { data, error } = await supabase
     .from('inventario_tienda')

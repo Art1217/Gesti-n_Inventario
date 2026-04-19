@@ -183,6 +183,7 @@ export default function Cotizador() {
   const [histTotal, setHistTotal]       = useState(0)
   const [histTotalPages, setHistTotalPages] = useState(1)
   const [histLoading, setHistLoading]   = useState(false)
+  const [histSearch, setHistSearch]     = useState('')
   const [pdfLoading, setPdfLoading]     = useState(null)
   const [modalOC, setModalOC]           = useState(null) // cotización seleccionada para crear OC
 
@@ -192,10 +193,10 @@ export default function Cotizador() {
   const [success, setSuccess]   = useState(null)
 
   // ── Cargar historial ──
-  const cargarHistorial = useCallback(async (page) => {
+  const cargarHistorial = useCallback(async (page, search) => {
     setHistLoading(true)
     try {
-      const { data, count, totalPages } = await getCotizaciones(page)
+      const { data, count, totalPages } = await getCotizaciones(page, search)
       setHistorial(data)
       setHistTotal(count)
       setHistTotalPages(totalPages)
@@ -207,8 +208,14 @@ export default function Cotizador() {
   }, [])
 
   useEffect(() => {
-    if (tab === 'historial') cargarHistorial(histPage)
-  }, [tab, histPage, cargarHistorial])
+    if (tab === 'historial') cargarHistorial(histPage, histSearch)
+  }, [tab, histPage, histSearch, cargarHistorial])
+
+  // Debounce búsqueda historial — resetea página al cambiar texto
+  useEffect(() => {
+    if (tab !== 'historial') return
+    setHistPage(1)
+  }, [histSearch, tab])
 
   const handleRegenerarPDF = async (id) => {
     setPdfLoading(id)
@@ -708,12 +715,22 @@ export default function Cotizador() {
         {/* ── Historial ── */}
         {tab === 'historial' && (
           <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
-              <h2 className="text-white font-semibold flex items-center gap-2">
+            <div className="px-5 py-4 border-b border-gray-800 flex flex-col sm:flex-row sm:items-center gap-3">
+              <h2 className="text-white font-semibold flex items-center gap-2 flex-shrink-0">
                 <History className="w-4 h-4 text-indigo-400" />
                 Cotizaciones Emitidas
+                <span className="text-xs text-gray-500 font-normal">{histTotal} en total</span>
               </h2>
-              <span className="text-xs text-gray-500">{histTotal} en total</span>
+              <div className="relative sm:ml-auto">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+                <input
+                  type="text"
+                  value={histSearch}
+                  onChange={e => setHistSearch(e.target.value)}
+                  placeholder="Buscar por cliente o RUC..."
+                  className="w-full sm:w-64 pl-8 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 text-xs focus:outline-none focus:border-indigo-500"
+                />
+              </div>
             </div>
 
             {histLoading ? (

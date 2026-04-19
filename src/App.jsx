@@ -11,6 +11,7 @@ import Proveedores from './pages/Proveedores'
 import Catalogo from './pages/Catalogo'
 import Cotizador from './pages/Cotizador'
 import OrdenesCompra from './pages/OrdenesCompra'
+import StockTienda from './pages/StockTienda'
 
 function RoleRedirect() {
   const { userRole, isLoading } = useAuth()
@@ -58,6 +59,9 @@ export default function App() {
       {/* ADMIN + VENDEDOR */}
       <Route path="/pos" element={
         <ProtectedRoute allowedRoles={['ADMIN', 'VENDEDOR']}><TiendaPOS /></ProtectedRoute>
+      } />
+      <Route path="/stock-tienda" element={
+        <ProtectedRoute allowedRoles={['ADMIN', 'VENDEDOR']}><StockTienda /></ProtectedRoute>
       } />
 
       {/* Fallback */}

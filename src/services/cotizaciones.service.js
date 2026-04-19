@@ -2,14 +2,21 @@ import { supabase } from '../lib/supabaseClient'
 
 const PAGE_SIZE = 20
 
-export async function getCotizaciones(page = 1) {
+export async function getCotizaciones(page = 1, search = '') {
   const from = (page - 1) * PAGE_SIZE
   const to   = from + PAGE_SIZE - 1
-  const { data, error, count } = await supabase
+
+  let q = supabase
     .from('cotizaciones')
     .select('id, cliente_ruc, cliente_razon_social, fecha, estado, total_final, created_at', { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(from, to)
+
+  if (search.trim()) {
+    q = q.or(`cliente_razon_social.ilike.%${search.trim()}%,cliente_ruc.ilike.%${search.trim()}%`)
+  }
+
+  const { data, error, count } = await q
   if (error) throw error
   return { data, count, totalPages: Math.ceil((count ?? 0) / PAGE_SIZE) }
 }

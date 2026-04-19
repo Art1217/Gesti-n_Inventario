@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
 import { getProveedores, crearProveedor, actualizarProveedor, eliminarProveedor } from '../services/proveedores.service'
-import { Plus, Pencil, Trash2, X, Loader2, Truck, AlertCircle } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, Loader2, Truck, AlertCircle, Search } from 'lucide-react'
 
 const EMPTY_FORM = { nombre: '', contacto: '', telefono: '' }
 
@@ -36,6 +36,7 @@ function InputField({ label, id, ...props }) {
 
 export default function Proveedores() {
   const [proveedores, setProveedores] = useState([])
+  const [search, setSearch]       = useState('')
   const [loading, setLoading]     = useState(true)
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState(null)
@@ -123,6 +124,20 @@ export default function Proveedores() {
           </div>
         )}
 
+        {/* Búsqueda */}
+        {!loading && proveedores.length > 0 && (
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar por nombre, contacto o teléfono..."
+              className="w-full sm:w-80 pl-10 pr-3 py-2.5 bg-gray-900 border border-gray-800 rounded-xl text-white placeholder-gray-500 text-sm focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+        )}
+
         {/* Tabla */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
           {loading ? (
@@ -148,7 +163,12 @@ export default function Proveedores() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800/60">
-                {proveedores.map((p) => (
+                {proveedores
+                  .filter(p => {
+                    const q = search.toLowerCase()
+                    return !q || p.nombre?.toLowerCase().includes(q) || p.contacto?.toLowerCase().includes(q) || p.telefono?.toLowerCase().includes(q)
+                  })
+                  .map((p) => (
                   <tr key={p.id} className="hover:bg-gray-800/30 transition-colors">
                     <td className="px-6 py-4 text-white font-medium text-sm">{p.nombre}</td>
                     <td className="px-6 py-4 text-gray-400 text-sm">{p.contacto || <span className="text-gray-600">—</span>}</td>
@@ -174,6 +194,9 @@ export default function Proveedores() {
                   </tr>
                 ))}
               </tbody>
+              {proveedores.filter(p => { const q = search.toLowerCase(); return !q || p.nombre?.toLowerCase().includes(q) || p.contacto?.toLowerCase().includes(q) || p.telefono?.toLowerCase().includes(q) }).length === 0 && search && (
+                <tfoot><tr><td colSpan={4} className="px-6 py-8 text-center text-gray-600 text-sm">Sin resultados para "{search}"</td></tr></tfoot>
+              )}
             </table>
             </div>
           )}

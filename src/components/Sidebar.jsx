@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   Package2, LayoutDashboard, Truck, BookOpen,
-  ShoppingCart, LogOut, ChevronRight, Calculator, ArrowRightLeft, FileText, ClipboardList
+  ShoppingCart, LogOut, ChevronRight, Calculator, ArrowRightLeft, FileText, ClipboardList, Store
 } from 'lucide-react'
 
 const NAV_ADMIN_ALMACENERO = [
@@ -17,7 +17,8 @@ const NAV_ADMIN_ALMACENERO = [
 ]
 
 const NAV_VENDEDOR = [
-  { to: '/pos', icon: ShoppingCart, label: 'Punto de Venta', roles: ['ADMIN', 'VENDEDOR'] },
+  { to: '/pos',          icon: ShoppingCart, label: 'Punto de Venta', roles: ['ADMIN', 'VENDEDOR'] },
+  { to: '/stock-tienda', icon: Store,        label: 'Stock Tienda',   roles: ['ADMIN', 'VENDEDOR'] },
 ]
 
 export default function Sidebar({ onCloseMobile, className = '' }) {

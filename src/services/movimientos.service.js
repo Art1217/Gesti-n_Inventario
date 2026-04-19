@@ -35,6 +35,55 @@ export async function getKpis() {
   }
 }
 
+// KPIs estratégicos: cotizaciones del mes + órdenes de compra
+export async function getKpisCotOC() {
+  const hoy        = new Date()
+  const primerDia  = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0]
+  const en7dias    = new Date(hoy.getTime() + 7 * 86400000).toISOString().split('T')[0]
+  const hoyStr     = hoy.toISOString().split('T')[0]
+
+  const [cotMesRes, montoMesRes, ocActivasRes, ocVencenRes, proximasRes] = await Promise.all([
+    // Cotizaciones emitidas este mes
+    supabase.from('cotizaciones')
+      .select('id', { count: 'exact', head: true })
+      .gte('fecha', primerDia),
+
+    // Monto total cotizado este mes
+    supabase.from('cotizaciones')
+      .select('total_final')
+      .gte('fecha', primerDia),
+
+    // OC activas (Pendiente + En Proceso)
+    supabase.from('ordenes_compra')
+      .select('id', { count: 'exact', head: true })
+      .in('estado', ['Pendiente', 'En Proceso']),
+
+    // OC que vencen en los próximos 7 días (incluyendo vencidas)
+    supabase.from('ordenes_compra')
+      .select('id', { count: 'exact', head: true })
+      .in('estado', ['Pendiente', 'En Proceso'])
+      .lte('fecha_entrega', en7dias),
+
+    // Próximos vencimientos (hasta 8 OC activas ordenadas por plazo)
+    supabase.from('ordenes_compra')
+      .select('id, tipo, cliente_nombre, fecha_entrega, estado, id_cotizacion, cotizaciones(cliente_razon_social)')
+      .in('estado', ['Pendiente', 'En Proceso'])
+      .not('fecha_entrega', 'is', null)
+      .order('fecha_entrega', { ascending: true })
+      .limit(8),
+  ])
+
+  const montoMes = (montoMesRes.data ?? []).reduce((s, r) => s + (r.total_final ?? 0), 0)
+
+  return {
+    cotMes:    cotMesRes.count ?? 0,
+    montoMes,
+    ocActivas: ocActivasRes.count ?? 0,
+    ocVencen:  ocVencenRes.count ?? 0,
+    proximas:  proximasRes.data ?? [],
+  }
+}
+
 // Datos para los gráficos: pie (por método de pago) y bar (top 5 productos)
 export async function getVentasParaGraficos() {
   const { data, error } = await supabase
@@ -75,20 +124,24 @@ const PAGE_SIZE = 20
 
 // Movimientos de un día específico con paginación y email de usuario
 // Retorna: { data: [...], count: number }
-export async function getMovimientosPorFecha(fecha, page = 1) {
+export async function getMovimientosPorFecha(fecha, page = 1, tipo = '') {
   const [y, m, d] = fecha.split('-')
   const start = new Date(y, m - 1, d, 0, 0, 0)
   const end   = new Date(y, m - 1, d, 23, 59, 59, 999)
   const from  = (page - 1) * PAGE_SIZE
   const to    = from + PAGE_SIZE - 1
 
-  const { data, error, count } = await supabase
+  let q = supabase
     .from('movimientos')
     .select('*, producto_variantes(sku, talla, color, productos(nombre))', { count: 'exact' })
     .gte('created_at', start.toISOString())
     .lte('created_at', end.toISOString())
     .order('created_at', { ascending: false })
     .range(from, to)
+
+  if (tipo) q = q.eq('tipo_movimiento', tipo)
+
+  const { data, error, count } = await q
   if (error) throw error
 
   const rows = data ?? []

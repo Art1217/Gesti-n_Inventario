@@ -10,6 +10,7 @@ import TiendaPOS from './pages/TiendaPOS'
 import Proveedores from './pages/Proveedores'
 import Catalogo from './pages/Catalogo'
 import Cotizador from './pages/Cotizador'
+import OrdenesCompra from './pages/OrdenesCompra'
 
 function RoleRedirect() {
   const { userRole, isLoading } = useAuth()
@@ -35,6 +36,9 @@ export default function App() {
       } />
       <Route path="/admin/cotizaciones" element={
         <ProtectedRoute allowedRoles={['ADMIN']}><Cotizador /></ProtectedRoute>
+      } />
+      <Route path="/admin/ordenes" element={
+        <ProtectedRoute allowedRoles={['ADMIN']}><OrdenesCompra /></ProtectedRoute>
       } />
 
       {/* ADMIN + ALMACENERO */}

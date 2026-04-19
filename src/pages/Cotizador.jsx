@@ -3,7 +3,8 @@ import Layout from '../components/Layout'
 import { useAuth } from '../context/AuthContext'
 import { buscarVariantesPOS } from '../services/productos.service'
 import { consultarRUC, guardarCotizacion, getCotizaciones, getCotizacionConItems } from '../services/cotizaciones.service'
-import { FileText, Search, Plus, Trash2, Loader2, AlertCircle, CheckCircle, Building2, X, History, Download, ChevronLeft, ChevronRight } from 'lucide-react'
+import { crearOrden, subirArchivoOC } from '../services/ordenes.service'
+import { FileText, Search, Plus, Trash2, Loader2, AlertCircle, CheckCircle, Building2, X, History, Download, ChevronLeft, ChevronRight, ClipboardList, Upload } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -183,6 +184,7 @@ export default function Cotizador() {
   const [histTotalPages, setHistTotalPages] = useState(1)
   const [histLoading, setHistLoading]   = useState(false)
   const [pdfLoading, setPdfLoading]     = useState(null)
+  const [modalOC, setModalOC]           = useState(null) // cotización seleccionada para crear OC
 
   // ── Estado global ──
   const [saving, setSaving]     = useState(false)
@@ -373,6 +375,7 @@ export default function Cotizador() {
   }
 
   return (
+    <>
     <Layout>
       <div className="p-6 md:p-8 max-w-6xl mx-auto space-y-6">
 
@@ -733,6 +736,7 @@ export default function Cotizador() {
                         <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fecha</th>
                         <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Total</th>
                         <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Estado</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">OC</th>
                         <th className="px-4 py-3 w-16"></th>
                       </tr>
                     </thead>
@@ -767,6 +771,24 @@ export default function Cotizador() {
                               {cot.estado}
                             </span>
                           </td>
+                          {/* Crear OC */}
+                          <td className="px-4 py-3">
+                            {cot.estado === 'Aceptada' ? (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">
+                                OC creada
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => setModalOC(cot)}
+                                title="Aceptar → Crear Orden de Compra"
+                                className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-indigo-300 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-600/20 rounded-lg transition-all"
+                              >
+                                <ClipboardList className="w-3 h-3" />
+                                Crear OC
+                              </button>
+                            )}
+                          </td>
+                          {/* PDF */}
                           <td className="px-4 py-3">
                             <button
                               onClick={() => handleRegenerarPDF(cot.id)}
@@ -817,5 +839,163 @@ export default function Cotizador() {
 
       </div>
     </Layout>
+
+    {/* Modal Crear OC desde historial */}
+    {modalOC && (
+      <ModalCrearOC
+        cotizacion={modalOC}
+        userId={user?.id}
+        onClose={() => setModalOC(null)}
+        onCreada={() => {
+          setModalOC(null)
+          cargarHistorial(histPage)
+          setSuccess('Orden de Compra creada correctamente.')
+          setTimeout(() => setSuccess(null), 5000)
+        }}
+        onError={setError}
+      />
+    )}
+    </>
+  )
+}
+
+// ── Modal Crear OC desde cotización ─────────────────────────────────────────
+
+const inputCls = 'w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 text-sm focus:outline-none focus:border-indigo-500'
+
+function ModalCrearOC({ cotizacion, userId, onClose, onCreada, onError }) {
+  const cotNum = `COT-${String(cotizacion.id).padStart(4, '0')}`
+  const [tipo, setTipo]               = useState('Externa')
+  const [fechaEntrega, setFechaEntrega] = useState('')
+  const [descripcion, setDescripcion]  = useState('')
+  const [archivo, setArchivo]          = useState(null)
+  const [notas, setNotas]              = useState('')
+  const [saving, setSaving]            = useState(false)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      const payload = {
+        tipo,
+        id_cotizacion:  cotizacion.id,
+        cliente_nombre: cotizacion.cliente_razon_social,
+        fecha_entrega:  fechaEntrega || null,
+        descripcion:    descripcion.trim() || null,
+        notas:          notas.trim() || null,
+        id_usuario:     userId,
+      }
+      const { id } = await crearOrden(payload)
+
+      // Subir archivo si es Externa y se adjuntó uno
+      if (tipo === 'Externa' && archivo) {
+        const path = await subirArchivoOC(archivo, id)
+        const { actualizarOrden } = await import('../services/ordenes.service')
+        await actualizarOrden(id, { archivo_url: path, archivo_nombre: archivo.name })
+      }
+
+      // Marcar cotización como Aceptada
+      const { supabase } = await import('../lib/supabaseClient')
+      await supabase.from('cotizaciones').update({ estado: 'Aceptada' }).eq('id', cotizacion.id)
+
+      onCreada()
+    } catch (err) {
+      onError(err.message)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <h3 className="text-white font-semibold text-sm">Crear Orden de Compra</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white"><X className="w-4 h-4" /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+
+          {/* Info cotización */}
+          <div className="bg-indigo-950/30 border border-indigo-800/30 rounded-xl px-3 py-2.5 text-xs space-y-0.5">
+            <p className="text-indigo-400 font-mono font-bold">{cotNum}</p>
+            <p className="text-white font-medium">{cotizacion.cliente_razon_social}</p>
+            <p className="text-gray-400">Total: S/ {Number(cotizacion.total_final).toFixed(2)}</p>
+          </div>
+
+          {/* Tipo */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-2">Tipo de orden</label>
+            <div className="flex gap-2">
+              {['Externa', 'Interna'].map(t => (
+                <button key={t} type="button"
+                  onClick={() => setTipo(t)}
+                  className={`flex-1 py-2 text-sm font-medium rounded-xl border transition-all ${
+                    tipo === t
+                      ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300'
+                      : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            <p className="text-gray-600 text-[10px] mt-1.5">
+              {tipo === 'Externa'
+                ? 'El cliente nos envió su documento OC (puedes subir el PDF).'
+                : 'Orden interna para gestionar la producción/abastecimiento del pedido.'}
+            </p>
+          </div>
+
+          {/* Archivo PDF (Externa) */}
+          {tipo === 'Externa' && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5">Documento OC del cliente (PDF)</label>
+              <label className="flex items-center gap-2 px-3 py-2.5 bg-gray-800 border border-dashed border-gray-700 rounded-xl cursor-pointer hover:border-indigo-500 transition-colors">
+                <Upload className="w-4 h-4 text-gray-500" />
+                <span className="text-xs text-gray-500">{archivo ? archivo.name : 'Seleccionar archivo (opcional)'}</span>
+                <input type="file" accept=".pdf,.png,.jpg,.jpeg" className="hidden"
+                  onChange={e => setArchivo(e.target.files[0] ?? null)} />
+              </label>
+            </div>
+          )}
+
+          {/* Descripción (Interna) */}
+          {tipo === 'Interna' && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5">Descripción del pedido</label>
+              <textarea value={descripcion} onChange={e => setDescripcion(e.target.value)}
+                placeholder="Ej: 100 pantalones cargo — producción interna"
+                rows={2} className={inputCls + ' resize-none'} />
+            </div>
+          )}
+
+          {/* Fecha entrega */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5">Fecha de entrega acordada</label>
+            <input type="date" value={fechaEntrega} onChange={e => setFechaEntrega(e.target.value)}
+              className={inputCls} />
+          </div>
+
+          {/* Notas */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5">Notas</label>
+            <textarea value={notas} onChange={e => setNotas(e.target.value)}
+              placeholder="Observaciones adicionales" rows={2}
+              className={inputCls + ' resize-none'} />
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 text-sm text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-xl transition-colors">
+              Cancelar
+            </button>
+            <button type="submit" disabled={saving}
+              className="flex-1 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-xl transition-colors flex items-center justify-center gap-2">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
+              {saving ? 'Creando...' : 'Crear Orden'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   )
 }

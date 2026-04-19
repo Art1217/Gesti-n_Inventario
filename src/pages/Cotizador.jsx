@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import Layout from '../components/Layout'
 import { useAuth } from '../context/AuthContext'
 import { buscarVariantesPOS } from '../services/productos.service'
-import { consultarRUC, guardarCotizacion } from '../services/cotizaciones.service'
-import { FileText, Search, Plus, Trash2, Loader2, AlertCircle, CheckCircle, Building2, X } from 'lucide-react'
+import { consultarRUC, guardarCotizacion, getCotizaciones, getCotizacionConItems } from '../services/cotizaciones.service'
+import { FileText, Search, Plus, Trash2, Loader2, AlertCircle, CheckCircle, Building2, X, History, Download, ChevronLeft, ChevronRight } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -173,10 +173,61 @@ export default function Cotizador() {
   const [manualRazonSocial, setManualRazonSocial] = useState('')
   const [manualDireccion, setManualDireccion]   = useState('')
 
+  // ── Pestaña activa ──
+  const [tab, setTab] = useState('nueva')
+
+  // ── Historial ──
+  const [historial, setHistorial]       = useState([])
+  const [histPage, setHistPage]         = useState(1)
+  const [histTotal, setHistTotal]       = useState(0)
+  const [histTotalPages, setHistTotalPages] = useState(1)
+  const [histLoading, setHistLoading]   = useState(false)
+  const [pdfLoading, setPdfLoading]     = useState(null)
+
   // ── Estado global ──
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState(null)
   const [success, setSuccess]   = useState(null)
+
+  // ── Cargar historial ──
+  const cargarHistorial = useCallback(async (page) => {
+    setHistLoading(true)
+    try {
+      const { data, count, totalPages } = await getCotizaciones(page)
+      setHistorial(data)
+      setHistTotal(count)
+      setHistTotalPages(totalPages)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setHistLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'historial') cargarHistorial(histPage)
+  }, [tab, histPage, cargarHistorial])
+
+  const handleRegenerarPDF = async (id) => {
+    setPdfLoading(id)
+    try {
+      const { cot, items } = await getCotizacionConItems(id)
+      const mappedItems = items.map(i => ({
+        nombre:          i.nombre_producto,
+        sku:             i.sku,
+        talla:           i.talla,
+        color:           i.color,
+        cantidad:        i.cantidad,
+        precio_unitario: i.precio_unitario,
+      }))
+      const sub = parseFloat(items.reduce((s, i) => s + Number(i.subtotal), 0).toFixed(2))
+      generarPDF(cot, mappedItems, { subtotal: sub, igv: Number(cot.igv), total: Number(cot.total_final) })
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setPdfLoading(null)
+    }
+  }
 
   // ── Sync modo manual → clienteData ──
   useEffect(() => {
@@ -303,6 +354,8 @@ export default function Cotizador() {
 
       setSuccess(`Cotización ${`COT-${String(cot.id).padStart(4, '0')}`} guardada y PDF generado.`)
       setTimeout(() => setSuccess(null), 6000)
+      setHistPage(1)
+      cargarHistorial(1)
 
       // Resetear formulario
       setRuc('')
@@ -332,6 +385,37 @@ export default function Cotizador() {
           </div>
         </div>
 
+        {/* Pestañas */}
+        <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
+          <button
+            onClick={() => setTab('nueva')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              tab === 'nueva'
+                ? 'bg-indigo-600 text-white shadow'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <Plus className="w-4 h-4" />
+            Nueva Cotización
+          </button>
+          <button
+            onClick={() => setTab('historial')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              tab === 'historial'
+                ? 'bg-indigo-600 text-white shadow'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <History className="w-4 h-4" />
+            Historial
+            {histTotal > 0 && (
+              <span className="bg-indigo-500/20 text-indigo-300 text-xs px-1.5 py-0.5 rounded-full font-bold">
+                {histTotal}
+              </span>
+            )}
+          </button>
+        </div>
+
         {/* Alertas globales */}
         {error && (
           <div className="flex items-center gap-2 bg-red-950/50 border border-red-800 text-red-300 rounded-xl px-4 py-3 text-sm">
@@ -347,7 +431,7 @@ export default function Cotizador() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+        {tab === 'nueva' && <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
 
           {/* ── Columna izquierda: Cliente + Búsqueda ── */}
           <div className="xl:col-span-2 space-y-5">
@@ -616,7 +700,121 @@ export default function Cotizador() {
               </button>
             </div>
           </div>
-        </div>
+        </div>}
+
+        {/* ── Historial ── */}
+        {tab === 'historial' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+              <h2 className="text-white font-semibold flex items-center gap-2">
+                <History className="w-4 h-4 text-indigo-400" />
+                Cotizaciones Emitidas
+              </h2>
+              <span className="text-xs text-gray-500">{histTotal} en total</span>
+            </div>
+
+            {histLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />
+              </div>
+            ) : historial.length === 0 ? (
+              <div className="text-center py-16 text-gray-600">
+                <FileText className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                <p className="text-sm">No hay cotizaciones aún</p>
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-800">
+                        <th className="px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">N°</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Cliente</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fecha</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Total</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Estado</th>
+                        <th className="px-4 py-3 w-16"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/50">
+                      {historial.map(cot => (
+                        <tr key={cot.id} className="hover:bg-gray-800/30 transition-colors">
+                          <td className="px-5 py-3">
+                            <span className="text-indigo-400 font-mono font-bold text-xs">
+                              COT-{String(cot.id).padStart(4, '0')}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="text-white text-xs font-medium leading-tight">{cot.cliente_razon_social}</p>
+                            {cot.cliente_ruc && (
+                              <p className="text-gray-500 font-mono text-[10px]">{cot.cliente_ruc}</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
+                            {new Date(cot.fecha).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-emerald-400 font-bold font-mono text-xs">
+                              S/ {Number(cot.total_final).toFixed(2)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${
+                              cot.estado === 'Emitida'
+                                ? 'bg-emerald-500/10 text-emerald-400'
+                                : 'bg-amber-500/10 text-amber-400'
+                            }`}>
+                              {cot.estado}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => handleRegenerarPDF(cot.id)}
+                              disabled={pdfLoading === cot.id}
+                              title="Descargar PDF"
+                              className="p-1.5 text-gray-500 hover:text-indigo-400 hover:bg-indigo-400/10 rounded-lg transition-all disabled:opacity-50"
+                            >
+                              {pdfLoading === cot.id
+                                ? <Loader2 className="w-4 h-4 animate-spin" />
+                                : <Download className="w-4 h-4" />
+                              }
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Paginación */}
+                {histTotalPages > 1 && (
+                  <div className="px-5 py-3 border-t border-gray-800 flex items-center justify-between">
+                    <span className="text-xs text-gray-500">
+                      Página {histPage} de {histTotalPages}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setHistPage(p => p - 1)}
+                        disabled={histPage === 1}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" /> Anterior
+                      </button>
+                      <button
+                        onClick={() => setHistPage(p => p + 1)}
+                        disabled={histPage === histTotalPages}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all"
+                      >
+                        Siguiente <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
       </div>
     </Layout>
   )

@@ -1,5 +1,34 @@
 import { supabase } from '../lib/supabaseClient'
 
+const PAGE_SIZE = 20
+
+export async function getCotizaciones(page = 1) {
+  const from = (page - 1) * PAGE_SIZE
+  const to   = from + PAGE_SIZE - 1
+  const { data, error, count } = await supabase
+    .from('cotizaciones')
+    .select('id, cliente_ruc, cliente_razon_social, fecha, estado, total_final, created_at', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to)
+  if (error) throw error
+  return { data, count, totalPages: Math.ceil((count ?? 0) / PAGE_SIZE) }
+}
+
+export async function getCotizacionConItems(id) {
+  const { data: cot, error: cotErr } = await supabase
+    .from('cotizaciones')
+    .select('*')
+    .eq('id', id)
+    .single()
+  if (cotErr) throw cotErr
+  const { data: items, error: itemsErr } = await supabase
+    .from('cotizacion_items')
+    .select('*')
+    .eq('id_cotizacion', id)
+  if (itemsErr) throw itemsErr
+  return { cot, items }
+}
+
 /**
  * Consulta el RUC en SUNAT vía la Edge Function.
  * Retorna { razonSocial, direccion, estado, condicion } o lanza error.
